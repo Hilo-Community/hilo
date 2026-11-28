@@ -222,8 +222,10 @@ fn a_load_cannot_route_updates_to_a_different_chat() {
     )
     .unwrap();
     // A protocol failure is reported as one: the chat shows it instead of reconnecting silently.
-    assert!(matches!(next(&rx), AcpEvent::Stopped { reason, failed: true }
-        if reason.contains("wrong session for session/update")));
+    assert!(
+        matches!(next(&rx), AcpEvent::Stopped { reason, failed: true }
+        if reason.contains("wrong session for session/update"))
+    );
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
