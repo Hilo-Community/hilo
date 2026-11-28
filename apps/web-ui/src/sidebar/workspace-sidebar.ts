@@ -1,3 +1,4 @@
+import { type PromptInput, createPromptInput } from "@hilo/editor-cm6";
 import { NewPanelMenu } from "../cockpit/panels/new-panel-menu.js";
 import { sessionIcon, sessionStatusDot } from "../cockpit/panels/session-presentation.js";
 import type { AgentRegistryHost } from "../settings/agent-registry.js";
@@ -11,24 +12,31 @@ import type {
 import { attribute, button, reconcile, visibility } from "../ui/dom-utils.js";
 import { Toast } from "../ui/toast.js";
 import { UI_STRINGS } from "../ui/ui-strings.js";
-import { FOLDER_ICON, GROUP_ICON } from "./icons.js";
+import { FILTER_ICON, FOLDER_ICON, GROUP_ICON, SEARCH_ICON, WORKSPACE_MORE_ICON } from "./icons.js";
 import {
+  MENU_CALENDAR_ICON,
   MENU_CHEVRONS_DOWN_ICON,
   MENU_CHEVRONS_UP_ICON,
   MENU_CHEVRON_DOWN_ICON,
   MENU_CHEVRON_UP_ICON,
+  MENU_CLOCK_ICON,
   MENU_CLOSE_ICON,
   MENU_CLOSE_MANY_ICON,
   MENU_COPY_ICON,
+  MENU_FILTER_ICON,
   MENU_FOLDER_ICON,
   MENU_FOLDER_MINUS_ICON,
   MENU_MAXIMIZE_ICON,
   MENU_RENAME_ICON,
   MENU_RESTORE_ICON,
+  MENU_SORT_ICON,
+  MENU_STATUS_ICON,
   MENU_TRASH_ICON,
 } from "./menu-icons.js";
-import { SidebarMenu } from "./sidebar-menu.js";
+import { type MenuEntry, SidebarMenu } from "./sidebar-menu.js";
 import { SidebarRow } from "./sidebar-row.js";
+
+type SessionFilter = "workspace" | "status" | "updated";
 
 interface GroupNodes {
   readonly el: HTMLElement;
@@ -69,15 +77,25 @@ export interface WorkspaceSidebarOptions {
 export class WorkspaceSidebar {
   private readonly projects = new Map<string, ProjectNodes>();
   private readonly projectsEl: HTMLElement;
+  private readonly workspaceLabel: HTMLElement;
+  private readonly searchToggleButton: HTMLButtonElement;
+  private readonly filterButton: HTMLButtonElement;
+  private readonly moreButton: HTMLButtonElement;
+  private readonly searchField: HTMLElement;
+  private readonly searchPrompt: PromptInput;
   private readonly openProjectButton: HTMLButtonElement;
   private readonly error: HTMLElement;
   private readonly menu: SidebarMenu;
+  private readonly headerMenu: SidebarMenu;
   private readonly newPanelMenu: NewPanelMenu;
   private readonly notice: Toast;
   private readonly unsubscribers: Array<() => void> = [];
   private opening = false;
   private switching = false;
   private destroyed = false;
+  private searchQuery = "";
+  private readonly sessionFilters = new Map<SessionFilter, Set<string>>();
+  private sessionSort: "updated" | "created" = "created";
 
   constructor(private readonly options: WorkspaceSidebarOptions) {
     const { controlsHost, treeHost, stores } = options;
@@ -86,8 +104,74 @@ export class WorkspaceSidebar {
     treeHost.className = "sidebar-navigation";
     treeHost.setAttribute("aria-label", UI_STRINGS.sidebar.navigation);
     this.menu = new SidebarMenu(treeHost);
+    this.headerMenu = new SidebarMenu(controlsHost.parentElement ?? controlsHost);
     this.newPanelMenu = new NewPanelMenu(treeHost.ownerDocument, options.agentRegistryHost);
     this.notice = new Toast(doc);
+    this.workspaceLabel = doc.createElement("div");
+    this.workspaceLabel.className = "sidebar-section-label";
+    this.workspaceLabel.textContent = UI_STRINGS.sidebar.workspaceLabel;
+
+    this.searchToggleButton = button(
+      doc,
+      "sidebar-icon-button",
+      UI_STRINGS.sidebar.searchWorkspaces,
+    );
+    this.searchToggleButton.innerHTML = SEARCH_ICON;
+    this.searchToggleButton.title = UI_STRINGS.sidebar.searchWorkspaces;
+    this.searchToggleButton.setAttribute("aria-expanded", "false");
+    this.searchToggleButton.addEventListener("click", () => this.toggleSearch());
+
+    this.filterButton = button(doc, "sidebar-icon-button", UI_STRINGS.sidebar.workspaceProperties);
+    this.filterButton.innerHTML = FILTER_ICON;
+    this.filterButton.title = UI_STRINGS.sidebar.workspaceProperties;
+    this.filterButton.addEventListener("click", () => this.openPropertiesMenu());
+
+    this.moreButton = button(doc, "sidebar-icon-button", UI_STRINGS.sidebar.moreWorkspaceActions);
+    this.moreButton.innerHTML = WORKSPACE_MORE_ICON;
+    this.moreButton.title = UI_STRINGS.sidebar.moreWorkspaceActions;
+    this.moreButton.addEventListener("click", () => {
+      const projectPath = stores.navigation.getState().projectPath;
+      this.headerMenu.open(this.moreButton, [
+        {
+          label: UI_STRINGS.sidebar.newGroup,
+          icon: MENU_FOLDER_ICON,
+          run: () => this.addGroup(projectPath),
+        },
+        {
+          label: UI_STRINGS.sidebar.openProjectMenu,
+          icon: MENU_FOLDER_ICON,
+          disabled: !options.openWorkspace || this.opening,
+          run: () => {
+            void this.openProject();
+          },
+        },
+      ]);
+    });
+
+    const sectionHeader = doc.createElement("div");
+    sectionHeader.className = "sidebar-section-header";
+    const sectionActions = doc.createElement("div");
+    sectionActions.className = "sidebar-section-actions";
+    sectionActions.append(this.searchToggleButton, this.filterButton, this.moreButton);
+    sectionHeader.append(this.workspaceLabel, sectionActions);
+
+    const searchField = doc.createElement("div");
+    searchField.className = "sidebar-search";
+    searchField.hidden = true;
+    this.searchPrompt = createPromptInput(searchField, {
+      placeholder: UI_STRINGS.sidebar.searchWorkspacesPlaceholder,
+      ariaLabel: UI_STRINGS.sidebar.searchWorkspaces,
+      maxLength: 200,
+      maxHeight: 24,
+      onSubmit: () => {},
+      onChange: (text) => {
+        this.searchQuery = text;
+        this.update();
+      },
+      onEscape: () => this.toggleSearch(false),
+    });
+    this.searchField = searchField;
+
     this.openProjectButton = button(
       doc,
       "sidebar-row sidebar-open-project sidebar-open-project-label",
@@ -103,7 +187,7 @@ export class WorkspaceSidebar {
     this.error.className = "sidebar-error";
     this.error.setAttribute("role", "alert");
     this.error.hidden = true;
-    controlsHost.append(this.openProjectButton, this.error);
+    controlsHost.append(this.openProjectButton, this.error, sectionHeader, searchField);
 
     this.projectsEl = doc.createElement("div");
     this.projectsEl.className = "sidebar-projects";
@@ -115,6 +199,12 @@ export class WorkspaceSidebar {
         if (next.activeChatId !== prev.activeChatId || next.chats !== prev.chats) this.update();
       }),
     );
+    // Relative date filters age without any store change.
+    const view = doc.defaultView;
+    const timer = view?.setInterval(() => {
+      if (this.sessionFilters.has("updated")) this.update();
+    }, 60_000);
+    if (timer !== undefined) this.unsubscribers.push(() => view?.clearInterval(timer));
   }
 
   /** A session can be closed unless an agent is running in it or waiting its turn. */
@@ -157,6 +247,19 @@ export class WorkspaceSidebar {
 
   private expandAll(expanded: boolean): void {
     this.options.stores.setAllWorkGroupsExpanded(expanded);
+  }
+
+  /** Shows or hides the search input; closing it without `force` clears an active query. */
+  private toggleSearch(force?: boolean): void {
+    const next = force ?? this.searchField.hidden;
+    this.searchField.hidden = !next;
+    attribute(this.searchToggleButton, "aria-expanded", String(next));
+    if (next) {
+      this.searchPrompt.focus();
+    } else if (this.searchQuery) {
+      // `setText` fires `onChange`, which clears `searchQuery` and re-renders.
+      this.searchPrompt.setText("");
+    }
   }
 
   private showError(error: unknown, fallback: string): void {
@@ -350,7 +453,6 @@ export class WorkspaceSidebar {
     const row = new SidebarRow(treeHost.ownerDocument, {
       kind: "session",
       onSelect: () => {
-        // selectChat records the owning group and the selected session in one step.
         this.withProject(projectPath, () => stores.selectChat(chat.chatId));
       },
       onMore: (anchor) => {
@@ -475,6 +577,144 @@ export class WorkspaceSidebar {
     return { el, folder, tree, groups: new Map() };
   }
 
+  private filterOptions(): MenuEntry[] {
+    const strings = UI_STRINGS.sidebar;
+    const choices = (
+      key: "workspace" | "status",
+      label: string,
+      options: readonly (readonly [string, string])[],
+      icon: string,
+    ): MenuEntry => ({
+      label,
+      icon,
+      highlighted: this.sessionFilters.has(key),
+      showTitle: true,
+      ...(key === "workspace" ? { searchLabel: strings.searchWorkspaces } : {}),
+      submenu: () =>
+        options.map(([value, name]) => ({
+          label: name,
+          checkbox: true,
+          checked: this.sessionFilters.get(key)?.has(value) ?? false,
+          run: () => {
+            const selected = this.sessionFilters.get(key) ?? new Set<string>();
+            if (selected.has(value)) selected.delete(value);
+            else selected.add(value);
+            if (selected.size) this.sessionFilters.set(key, selected);
+            else this.sessionFilters.delete(key);
+            this.update();
+            const count = this.sessionFilters.size;
+            this.headerMenu.setEntryHighlight(label, selected.size > 0);
+            this.headerMenu.setEntryHighlight(
+              strings.filter,
+              count > 0,
+              count ? String(count) : "",
+            );
+            this.headerMenu.setResetVisible(count > 0 || this.sessionSort === "updated");
+          },
+        })),
+    });
+    const updatedOptions = [
+      ["today", strings.filterToday],
+      ["7", strings.filterLastWeek],
+      ["14", strings.filterLastTwoWeeks],
+      ["30", strings.filterLastMonth],
+    ] as const;
+    return [
+      choices(
+        "workspace",
+        strings.filterWorkspace,
+        listProjects(this.options.stores.navigation.getState())
+          .filter(({ path }) => path !== "")
+          .map(({ path }) => [path, path.split(/[\\/]/).filter(Boolean).pop() ?? path]),
+        MENU_FOLDER_ICON,
+      ),
+      choices(
+        "status",
+        strings.filterStatus,
+        [
+          ["running", strings.filterRunning],
+          ["inactive", strings.filterInactive],
+        ],
+        MENU_STATUS_ICON,
+      ),
+      {
+        label: strings.filterUpdatedTime,
+        icon: MENU_CALENDAR_ICON,
+        highlighted: this.sessionFilters.has("updated"),
+        showTitle: true,
+        submenu: updatedOptions.map(([value, label]) => ({
+          label,
+          checked: this.sessionFilters.get("updated")?.has(value) ?? false,
+          run: () => {
+            if (this.sessionFilters.get("updated")?.has(value))
+              this.sessionFilters.delete("updated");
+            else this.sessionFilters.set("updated", new Set([value]));
+            this.refreshProperties();
+          },
+        })),
+      },
+    ];
+  }
+
+  private openPropertiesMenu(): void {
+    const updated = this.sessionSort === "updated";
+    this.headerMenu.open(
+      this.filterButton,
+      [
+        {
+          label: UI_STRINGS.sidebar.sort,
+          icon: MENU_SORT_ICON,
+          highlighted: updated,
+          value: updated ? UI_STRINGS.sidebar.sortUpdated : UI_STRINGS.sidebar.sortCreated,
+          submenu: [
+            {
+              label: UI_STRINGS.sidebar.sortUpdated,
+              icon: MENU_CLOCK_ICON,
+              checked: updated,
+              highlighted: updated,
+              run: () => this.sortSessions("updated"),
+            },
+            {
+              label: UI_STRINGS.sidebar.sortCreated,
+              icon: MENU_CLOCK_ICON,
+              checked: !updated,
+              run: () => this.sortSessions("created"),
+            },
+          ],
+        },
+        {
+          label: UI_STRINGS.sidebar.filter,
+          icon: MENU_FILTER_ICON,
+          highlighted: this.sessionFilters.size > 0,
+          value: this.sessionFilters.size ? String(this.sessionFilters.size) : "",
+          searchLabel: UI_STRINGS.sidebar.searchFilters,
+          submenu: () => this.filterOptions(),
+        },
+      ],
+      UI_STRINGS.sidebar.workspaceProperties,
+      {
+        reset: {
+          label: UI_STRINGS.sidebar.resetProperties,
+          hidden: !updated && this.sessionFilters.size === 0,
+          run: () => {
+            this.sessionFilters.clear();
+            this.sortSessions("created");
+          },
+        },
+      },
+    );
+  }
+
+  private sortSessions(sort: "updated" | "created"): void {
+    this.sessionSort = sort;
+    this.refreshProperties();
+  }
+
+  private refreshProperties(): void {
+    this.update();
+    this.openPropertiesMenu();
+  }
+
   private update(): void {
     const { stores } = this.options;
     const focused = this.options.treeHost.ownerDocument.activeElement as HTMLElement | null;
@@ -494,6 +734,19 @@ export class WorkspaceSidebar {
         this.projects.delete(path);
       }
     }
+    const query = this.searchQuery.trim().toLowerCase();
+    const now = Date.now();
+    const workspaces = this.sessionFilters.get("workspace");
+    const statuses = this.sessionFilters.get("status");
+    const [updatedSince] = this.sessionFilters.get("updated") ?? [];
+    const cutoff =
+      updatedSince === "today"
+        ? new Date(now).setHours(0, 0, 0, 0)
+        : updatedSince
+          ? now - Number(updatedSince) * 86_400_000
+          : undefined;
+    const filtering = this.sessionFilters.size > 0;
+    const searching = query !== "" || filtering;
     const nextProjects: HTMLElement[] = [];
     for (const entry of entries) {
       let project = this.projects.get(entry.path);
@@ -505,10 +758,10 @@ export class WorkspaceSidebar {
       project.folder.update(name, false, entry.expanded ?? true);
       attribute(project.folder.select, "title", entry.path || name);
       attribute(project.el, "data-active", String(entry.active));
-      visibility(project.tree, entry.expanded ?? true);
       const nextGroups: HTMLElement[] = [];
       const retained = new Set(entry.groups.map((group) => group.id));
       for (const [id] of project.groups) if (!retained.has(id)) project.groups.delete(id);
+      let anyGroupVisible = false;
       for (const group of entry.groups) {
         let nodes = project.groups.get(group.id);
         if (!nodes) {
@@ -517,12 +770,19 @@ export class WorkspaceSidebar {
         }
         const groupActive = entry.active && entry.activeGroupId === group.id;
         nodes.row.update(group.title, groupActive, group.expanded ?? true);
-        visibility(nodes.sessions, group.expanded ?? true);
         const nextSessions: HTMLElement[] = [];
         const retainedSessions = new Set(group.chatIds);
         for (const [id] of nodes.chats)
           if (!retainedSessions.has(id) || !chats.has(id)) nodes.chats.delete(id);
-        for (const id of group.chatIds) {
+        let anySessionMatches = false;
+        // Groups append each new session to their stored order.
+        const sortedIds = [...group.chatIds].reverse();
+        if (this.sessionSort === "updated") {
+          sortedIds.sort(
+            (a, b) => (chats.get(b)?.lastActiveAt ?? 0) - (chats.get(a)?.lastActiveAt ?? 0),
+          );
+        }
+        for (const id of sortedIds) {
           const chat = chats.get(id);
           if (!chat) continue;
           let row = nodes.chats.get(id);
@@ -533,12 +793,33 @@ export class WorkspaceSidebar {
           row.setIcon(sessionIcon(chat));
           row.setStatusDot(sessionStatusDot(chat));
           row.update(chat.title, groupActive && chatState.activeChatId === id);
+          const running =
+            sessionStatusDot(chat) === "running" ||
+            (chat.kind === "terminal" &&
+              chat.detectedAgentId === undefined &&
+              chat.running === true);
+          const sessionMatches =
+            (query === "" || chat.title.toLowerCase().includes(query)) &&
+            (!workspaces || workspaces.has(entry.path)) &&
+            (!statuses || statuses.has(running ? "running" : "inactive")) &&
+            (cutoff === undefined || (chat.lastActiveAt ?? 0) >= cutoff);
+          if (sessionMatches) anySessionMatches = true;
+          row.el.hidden = !sessionMatches;
           nextSessions.push(row.el);
         }
         reconcile(nodes.sessions, nextSessions);
+        const groupTitleMatches = query === "" || group.title.toLowerCase().includes(query);
+        const groupVisible = anySessionMatches || (!filtering && groupTitleMatches);
+        nodes.el.hidden = searching && !groupVisible;
+        visibility(nodes.sessions, searching ? groupVisible : (group.expanded ?? true));
+        if (groupVisible) anyGroupVisible = true;
         nextGroups.push(nodes.el);
       }
       reconcile(project.tree, nextGroups);
+      const projectNameMatches = query === "" || name.toLowerCase().includes(query);
+      const projectVisible = anyGroupVisible || (!filtering && projectNameMatches);
+      project.el.hidden = searching && !projectVisible;
+      visibility(project.tree, searching ? projectVisible : (entry.expanded ?? true));
       nextProjects.push(project.el);
     }
     reconcile(this.projectsEl, nextProjects);
@@ -557,6 +838,8 @@ export class WorkspaceSidebar {
   destroy(): void {
     this.destroyed = true;
     this.menu.close(false);
+    this.headerMenu.close(false);
+    this.searchPrompt.destroy();
     this.newPanelMenu.destroy();
     this.notice.destroy();
     for (const unsubscribe of this.unsubscribers) unsubscribe();

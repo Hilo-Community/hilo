@@ -19,6 +19,10 @@ export interface PromptInputOptions {
    * one again. A host can then move its buttons under the text.
    */
   onMultilineChange?(multiline: boolean): void;
+  /** The text after any edit (typing, paste, undo…), for a host that filters as you type. */
+  onChange?(text: string): void;
+  /** Escape, e.g. for a host that uses the field as a dismissible filter. */
+  onEscape?(): void;
 }
 
 export interface PromptInput {
@@ -64,6 +68,7 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
         EditorView.lineWrapping,
         hint.of(placeholder(options.placeholder)),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged) options.onChange?.(update.state.doc.toString());
           if (!update.docChanged && !update.geometryChanged) return;
           const doc = update.state.doc;
           // Only text counts: an empty field shows the placeholder, which never wraps.
@@ -95,6 +100,14 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
               },
             },
             { key: "Shift-Enter", run: insertNewline },
+            {
+              key: "Escape",
+              run: () => {
+                if (!options.onEscape) return false;
+                options.onEscape();
+                return true;
+              },
+            },
           ]),
         ),
         keymap.of([...defaultKeymap, ...historyKeymap]),

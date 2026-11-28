@@ -57,7 +57,10 @@ export function createSessionStatusActions(ctx: StoreContext): SessionStatusActi
         return {
           ...prev,
           chats: prev.chats.map((c) =>
-            c.kind === "agent" && c.chatId === chatId ? { ...c, statusBadge: badge } : c,
+            // A turn starting, ending or waiting is activity; dismissing a badge (undefined) is not.
+            c.kind === "agent" && c.chatId === chatId
+              ? { ...c, statusBadge: badge, ...(badge ? { lastActiveAt: Date.now() } : {}) }
+              : c,
           ),
         };
       });

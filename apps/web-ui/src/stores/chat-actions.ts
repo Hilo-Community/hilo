@@ -187,6 +187,7 @@ export function createChatActions(ctx: StoreContext): ChatActions {
                 options?.title?.trim() ||
                 `Terminal${z3.chats.filter((item) => item.kind === "terminal").length > 0 ? ` ${z3.chats.filter((item) => item.kind === "terminal").length + 1}` : ""}`,
               validationState: "UnchangedBlue",
+              lastActiveAt: Date.now(),
             }
           : {
               chatId,
@@ -200,6 +201,7 @@ export function createChatActions(ctx: StoreContext): ChatActions {
               modelName: options?.modelName ?? sibling?.modelName ?? "Codex",
               validationState: "UnchangedBlue",
               agentExecutionStatus: "Idle",
+              lastActiveAt: Date.now(),
             };
       zone3.setState((prev) => ({
         ...prev,

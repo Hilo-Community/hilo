@@ -7,13 +7,27 @@ import { CLOSE_PANEL_ICON, MAXIMIZE_ICON, RESTORE_ICON } from "../cockpit/panels
  */
 const open = (viewBox: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="${viewBox}" aria-hidden="true">`;
-const line = (body: string) =>
-  `${open("0 0 24 24")}<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">${body}</g></svg>`;
+const line = (body: string, viewBox = "0 0 24 24") =>
+  `${open(viewBox)}<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">${body}</g></svg>`;
 
 /** A chevron pointing down: expand. */
 export const MENU_CHEVRON_DOWN_ICON = line('<path d="m4 9 8 8 8-8"/>');
 /** A chevron pointing up: collapse. */
 export const MENU_CHEVRON_UP_ICON = line('<path d="m4 15 8-8 8 8"/>');
+export const MENU_CHEVRON_RIGHT_ICON = line('<path d="m9 5 7 7-7 7"/>');
+export const MENU_FILTER_ICON = line('<path d="M3 6h18M6 12h12m-9 6h6"/>');
+export const MENU_STATUS_ICON = line(
+  '<circle cx="12" cy="12" r="8"/><path d="m8 12 3 3 5-6"/>',
+  "1 1 22 22",
+);
+export const MENU_CALENDAR_ICON = line(
+  '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/>',
+);
+export const MENU_CHECK_ICON = line('<path d="m5 12 4 4L19 6"/>');
+export const MENU_SORT_ICON = `${open("3 3 30 30")}<g transform="rotate(90 18 18)"><path fill="currentColor" d="M23.43 16.83A1 1 0 0 0 22 18.24L25.72 22H7.83a1 1 0 0 0 0 2h17.89L22 27.7a1 1 0 1 0 1.42 1.41L29.53 23Z"/><path fill="currentColor" d="M13.24 18.45a1 1 0 0 0 .71-1.71L10.24 13h17.88a1 1 0 0 0 0-2H10.24l3.71-3.73a1 1 0 0 0-1.42-1.41L6.42 12l6.11 6.14a1 1 0 0 0 .71.31"/></g></svg>`;
+export const MENU_CLOCK_ICON = line(
+  '<circle cx="12" cy="12" r="10"/><path d="m15 16l-2.414-2.414A2 2 0 0 1 12 12.172V6"/>',
+);
 /** Two chevrons pointing down: expand everything. */
 export const MENU_CHEVRONS_DOWN_ICON = line('<path d="m4 4 8 8 8-8"/><path d="m4 13 8 8 8-8"/>');
 /** The same turned upside down: collapse everything. */

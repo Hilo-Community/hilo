@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { promptInputOf } from "@hilo/editor-cm6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCockpitStoreBundle } from "../stores/index.js";
 import { FrameBatchedStreamRenderer } from "../ui/stream-renderer.js";
@@ -59,9 +60,11 @@ function setup(
 
 /** The open menu's entry with this label. */
 function menuItem(root: ParentNode, label: string): HTMLButtonElement {
-  const item = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
-    (entry) => entry.textContent === label,
-  );
+  const item = Array.from(
+    root.querySelectorAll<HTMLButtonElement>(
+      '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]',
+    ),
+  ).find((entry) => entry.firstElementChild?.textContent === label);
   if (!item) throw new Error(`Missing menu entry: ${label}`);
   return item;
 }
@@ -102,7 +105,7 @@ describe("Workspace sidebar", () => {
       attempt();
       notice?.querySelector<HTMLButtonElement>("button")?.click();
       expect(notice?.hidden).toBe(true);
-      expect(vi.getTimerCount()).toBe(0);
+      expect(vi.getTimerCount()).toBe(1);
     },
   );
 
@@ -494,6 +497,156 @@ describe("Workspace sidebar", () => {
 describe("Zone 2 option menus", () => {
   const labels = (root: ParentNode) =>
     Array.from(root.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent);
+
+  it("keeps Status open while toggling both options", () => {
+    const { root, get } = setup();
+    get('button[aria-label="Properties"]').click();
+    menuItem(root, "Filter").click();
+    menuItem(document, "Status").click();
+    const statuses = document.querySelector('[role="menu"][aria-label="Status"]');
+    if (!statuses) throw new Error("Missing status menu");
+    const running = menuItem(statuses, "Running");
+    const inactive = menuItem(statuses, "Inactive");
+    expect(running.getAttribute("aria-checked")).toBe("false");
+    expect(inactive.getAttribute("aria-checked")).toBe("false");
+
+    running.click();
+    inactive.click();
+    expect(statuses.isConnected).toBe(true);
+    expect(running.getAttribute("aria-checked")).toBe("true");
+    expect(inactive.getAttribute("aria-checked")).toBe("true");
+    expect(get(".sidebar-menu-reset").hidden).toBe(false);
+
+    running.click();
+    inactive.click();
+    expect(statuses.isConnected).toBe(true);
+    expect(get(".sidebar-menu-reset").hidden).toBe(true);
+  });
+
+  it("shows searchable workspace options", () => {
+    const { root, get } = setup();
+    get('button[aria-label="Properties"]').click();
+    menuItem(root, "Filter").dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "mouse" }),
+    );
+    menuItem(document, "Workspace").dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "mouse" }),
+    );
+    const workspace = document.querySelector('[role="menu"][aria-label="Workspace"]');
+    if (!workspace) throw new Error("Missing workspace menu");
+    const search = promptInputOf(workspace.querySelector(".cm-editor"));
+    if (!search) throw new Error("Missing workspace search");
+    search.setText("missing");
+    const hilo = menuItem(workspace, "Hilo");
+    expect(hilo.hidden).toBe(true);
+    search.setText("hilo");
+    expect(hilo.hidden).toBe(false);
+    hilo.click();
+    expect(hilo.getAttribute("aria-checked")).toBe("true");
+    expect(workspace.isConnected).toBe(true);
+  });
+
+  it("shows Sort first in Properties and opens its submenu on hover", () => {
+    vi.useFakeTimers();
+    const { root, get } = setup();
+    get('button[aria-label="Properties"]').click();
+    const sort = menuItem(root, "Sort");
+    expect(root.querySelector('[role="menuitem"]:not([hidden])')).toBe(sort);
+    sort.dispatchEvent(new MouseEvent("click", { detail: 1 }));
+    expect(sort.getAttribute("aria-expanded")).toBe("false");
+
+    const pointer = (target: HTMLElement, type: string) =>
+      target.dispatchEvent(new PointerEvent(type, { pointerType: "mouse" }));
+    pointer(sort, "pointerenter");
+    expect(sort.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(sort);
+    const submenu = menuItem(document, "Updated").parentElement as HTMLElement;
+    pointer(sort, "pointerleave");
+    pointer(submenu, "pointerenter");
+    vi.advanceTimersByTime(250);
+    expect(submenu.isConnected).toBe(true);
+    pointer(submenu, "pointerleave");
+    vi.advanceTimersByTime(250);
+    expect(submenu.isConnected).toBe(false);
+  });
+
+  it("searches filter categories and applies or resets a session status filter", () => {
+    const { root, get, stores } = setup();
+    stores.setChatStatusBadge("a", "running");
+    get('button[aria-label="Properties"]').click();
+    menuItem(root, "Filter").dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "mouse" }),
+    );
+    const search = promptInputOf(document.querySelector(".sidebar-menu-search .cm-editor"));
+    if (!search) throw new Error("Missing filter search");
+    search.setText("sta");
+    expect(menuItem(document, "Workspace").hidden).toBe(true);
+    expect(menuItem(document, "Status").hidden).toBe(false);
+    menuItem(document, "Status").click();
+    const running = menuItem(document, "Running");
+    running.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    expect(running.isConnected).toBe(true);
+    running.click();
+
+    expect(menuItem(root, "Filter").querySelector(".sidebar-menu-value")?.textContent).toBe("1");
+    expect(
+      get('button[data-chat-id="a"]').closest<HTMLElement>(".sidebar-row--session")?.hidden,
+    ).toBe(false);
+    expect(
+      get('button[data-chat-id="b"]').closest<HTMLElement>(".sidebar-row--session")?.hidden,
+    ).toBe(true);
+    get(".sidebar-menu-reset").click();
+    expect(
+      get('button[data-chat-id="b"]').closest<HTMLElement>(".sidebar-row--session")?.hidden,
+    ).toBe(false);
+  });
+
+  it("opens Sort with the keyboard and orders sessions by activity or creation", () => {
+    vi.useFakeTimers();
+    const { root, get, stores } = setup();
+    const filter = get('button[aria-label="Properties"]');
+    const sessionIds = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>("button[data-chat-id]"), (button) =>
+        button.getAttribute("data-chat-id"),
+      );
+    vi.advanceTimersByTime(1000);
+    stores.setChatStatusBadge("a", "running");
+
+    filter.click();
+    const sort = menuItem(root, "Sort");
+    expect(sort.querySelector(".sidebar-menu-value")?.textContent).toBe("Created");
+    expect(root.querySelector(".sidebar-menu-reset:not([hidden])")).toBeNull();
+    sort.focus();
+    sort.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const updated = menuItem(document, "Updated");
+    expect(menuItem(document, "Created").getAttribute("aria-checked")).toBe("true");
+    expect(menuItem(document, "Created").querySelector(".sidebar-menu-check svg")).not.toBeNull();
+    expect(updated.getAttribute("aria-checked")).toBe("false");
+    expect(document.activeElement).toBe(updated);
+    updated.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(document.activeElement).toBe(sort);
+    sort.click();
+    menuItem(document, "Updated").click();
+    expect(sessionIds()).toEqual(["a", "b"]);
+
+    const sortUpdated = menuItem(root, "Sort");
+    expect(document.activeElement).toBe(sortUpdated);
+    expect(sortUpdated.classList.contains("sidebar-menu-item--highlighted")).toBe(true);
+    expect(sortUpdated.querySelector(".sidebar-menu-value")?.textContent).toBe("Updated");
+    sortUpdated.click();
+    expect(menuItem(document, "Updated").getAttribute("aria-checked")).toBe("true");
+    expect(menuItem(document, "Updated").classList.contains("sidebar-menu-item--highlighted")).toBe(
+      true,
+    );
+    get(".sidebar-menu-reset").click();
+    expect(root.querySelector(".sidebar-menu-reset:not([hidden])")).toBeNull();
+    expect(menuItem(root, "Sort").classList.contains("sidebar-menu-item--highlighted")).toBe(false);
+    expect(menuItem(root, "Sort").querySelector(".sidebar-menu-value")?.textContent).toBe(
+      "Created",
+    );
+    expect(sessionIds()).toEqual(["b", "a"]);
+    expect(stores.navigation.getState().groups[0]?.chatIds).toEqual(["a", "b"]);
+  });
 
   it("offers every folder action, with the destructive one last and in red", () => {
     const { root, get } = setup();
