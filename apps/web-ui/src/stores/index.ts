@@ -15,7 +15,8 @@ export {
   inferImpactedTestsHeuristically as computeImpactedTestsForBuffer,
 } from "../analysis/cockpit-analysis.js";
 export { AtomicStore, type StoreListener } from "../state/atomic-store.js";
-export { HILO_DESIGN_TOKENS, type DesignStateTokens } from "../ui/design-state-tokens.js";
+export * from "../state/ui-preferences.js";
+export { HILO_DESIGN_TOKENS, type DesignStateTokens } from "../theme/design-state-tokens.js";
 export type { AreaSize } from "../layout/layout-tree.js";
 export type { WorkGroup, WorkspaceNavigationState } from "../state/workspace-navigation.js";
 export { resolveGroupLayout, resolveGroupMaximized } from "../state/workspace-navigation.js";
@@ -31,7 +32,10 @@ export function createCockpitStoreBundle(options?: CockpitStoreOptions): Cockpit
   const navigationActions = createWorkspaceNavigation(
     options?.initialNavigation,
     initialChats.map((chat) => chat.chatId),
-    () => zone3.getState().chats.map((chat) => chat.chatId),
+    () =>
+      zone3
+        .getState()
+        .chats.flatMap((chat) => (chat.kind === "agent" && chat.panelHidden ? [] : [chat.chatId])),
     (chatId) => bundle.selectChat(chatId),
   );
 

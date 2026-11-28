@@ -34,10 +34,13 @@ fn main() {
     let mut cwd = String::new();
     let mut mcp_servers = json!(null);
     // `mcp` speaks HTTP MCP and should be offered the Host relay; `mcp-plain` does not.
-    let capabilities = if mode == "mcp" {
-        json!({"mcpCapabilities":{"http":true}})
-    } else {
-        json!({})
+    let capabilities = match mode.as_str() {
+        "mcp" => json!({"mcpCapabilities":{"http":true}}),
+        "resume" | "recovery-fallback" => {
+            json!({"sessionCapabilities":{"resume":{}}, "loadSession":true})
+        }
+        "load" | "foreign-replay" => json!({"loadSession":true}),
+        _ => json!({}),
     };
     for (id, result) in [
         (
@@ -62,6 +65,63 @@ fn main() {
         };
         if id == 1 {
             let request: Value = serde_json::from_str(&line).unwrap_or_default();
+            if mode == "recovery-fallback" {
+                let mut request = request;
+                let cwd = request["params"]["cwd"].clone();
+                for method in ["session/resume", "session/load"] {
+                    assert_eq!(request["method"], method);
+                    assert_eq!(request["params"]["sessionId"], "saved");
+                    assert_eq!(request["params"]["cwd"], cwd);
+                    emit(json!({"jsonrpc":"2.0","id":request["id"],
+                        "error":{"code":-32002,"message":"unknown session"}}));
+                    request = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+                }
+                assert_eq!(request["method"], "session/new");
+                assert_eq!(request["params"]["cwd"], cwd);
+                emit(
+                    json!({"jsonrpc":"2.0","id":request["id"],"result":{"sessionId":"replacement"}}),
+                );
+                let request: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], "session/prompt");
+                assert_eq!(request["params"]["sessionId"], "replacement");
+                let prompt = request["params"]["prompt"].as_array().unwrap();
+                assert_eq!(prompt.len(), 2);
+                assert!(prompt[0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("saved user turn"));
+                assert_eq!(prompt[1]["text"], "follow-up");
+                emit(
+                    json!({"jsonrpc":"2.0","id":request["id"],"result":{"stopReason":"end_turn"}}),
+                );
+                return;
+            }
+            if mode == "foreign-replay" {
+                assert_eq!(request["method"], "session/load");
+                emit(json!({"jsonrpc":"2.0","method":"session/update","params":{
+                    "sessionId":"another-chat","update":{"sessionUpdate":"agent_message_chunk",
+                    "content":{"type":"text","text":"another chat's contents"}}
+                }}));
+                return;
+            }
+            if mode == "resume" || mode == "load" {
+                assert_eq!(request["method"], format!("session/{mode}"));
+                assert_eq!(request["params"]["sessionId"], "saved");
+                if mode == "load" {
+                    emit(json!({"jsonrpc":"2.0","method":"session/update","params":{
+                        "sessionId":"saved","update":{"sessionUpdate":"user_message_chunk",
+                        "content":{"type":"text","text":"already saved"}}
+                    }}));
+                }
+                emit(json!({"jsonrpc":"2.0","id":id,"result":{}}));
+                let request: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+                assert_eq!(request["method"], "session/prompt");
+                assert_eq!(request["params"]["sessionId"], "saved");
+                emit(
+                    json!({"jsonrpc":"2.0","id":request["id"],"result":{"stopReason":"end_turn"}}),
+                );
+                return;
+            }
             cwd = request["params"]["cwd"].as_str().unwrap_or_default().into();
             mcp_servers = request["params"]["mcpServers"].clone();
         }
@@ -125,6 +185,17 @@ fn main() {
             println!("{{broken}}");
             return;
         }
+        "permission-choice" => request(
+            10,
+            "session/request_permission",
+            json!({
+                "toolCall":{"toolCallId":"tool"},
+                "options":[
+                    {"optionId":"once","name":"Once","kind":"allow_once"},
+                    {"optionId":"remember","name":"Remember","kind":"allow_always"}
+                ]
+            }),
+        ),
         "flood" => {
             for i in 0..34 {
                 request(
@@ -195,6 +266,18 @@ fn main() {
         };
         if value["method"] == "session/cancel" {
             break;
+        }
+        if mode == "permission-choice" && value["id"] == 10 {
+            assert_eq!(
+                value["result"]["outcome"],
+                json!({"outcome":"selected","optionId":"remember"})
+            );
+            emit(
+                json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fake","update":{
+                    "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"choice confirmed"}
+                }}}),
+            );
+            return;
         }
         if mode == "options" {
             match value["method"].as_str() {

@@ -27,4 +27,25 @@
     -webkit-user-select: text;
     user-select: text;
   }
+
+  /*
+   * A conversation reads and copies like a document: every message, list, table, code block and
+   * tool output inside it. The base reset sets `user-select: none` on every element (`*`), not
+   * only on the body, so the containers above are not enough; their content needs it too. Controls
+   * inside (buttons, gutters) opt out again in their own rules.
+   */
+  .hilo-agent-output,
+  .hilo-agent-output *,
+  .hilo-chat-cell-messages *,
+  .hilo-chat-cell-logs * {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .hilo-agent-output button,
+  .hilo-agent-output button *,
+  .hilo-agent-output summary,
+  .hilo-agent-output summary * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }

@@ -1,4 +1,11 @@
-import type { AgentState, ProposedEdit, Thought, TimelineRef, ToolCard } from "./store.js";
+import type {
+  AgentState,
+  ProposedEdit,
+  SavedAgentOption,
+  Thought,
+  TimelineRef,
+  ToolCard,
+} from "./store.js";
 import {
   type FileDiff,
   TOOL_DIFF_FILES,
@@ -19,6 +26,9 @@ export interface AgentTranscripts {
 /** What is saved of a conversation. The same shape the panel shows, with no HTML in it. */
 export interface Snapshot {
   agentId: string;
+  sessionId?: string;
+  draft?: string;
+  savedOptions?: readonly SavedAgentOption[];
   messages: { id: string; role: string; text: string }[];
   timeline: TimelineRef[];
   tools: ToolCard[];
@@ -36,12 +46,16 @@ const MAX_SAVED = 2.5 * 1024 * 1024;
 const STATUSES = ["pending", "running", "done", "denied", "failed"];
 
 /** The text to save, or null when there is nothing to keep (or it cannot be kept in full). */
-export function serializeTranscript(state: AgentState, agentId: string): string | null {
-  if (state.timeline.length === 0) return null;
+export function serializeTranscript(state: AgentState, agentId: string, draft = ""): string | null {
+  if (!draft && !state.timeline.length && !state.sessionId && !state.savedOptions?.length)
+    return null;
   const build = (withOutput: boolean) =>
     JSON.stringify({
       version: VERSION,
       agentId,
+      ...(draft ? { draft } : {}),
+      ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+      ...(state.savedOptions?.length ? { savedOptions: state.savedOptions } : {}),
       messages: state.messages.map(({ id, role, text }) => ({ id, role, text })),
       timeline: state.timeline,
       tools: withOutput
@@ -59,6 +73,10 @@ export function serializeTranscript(state: AgentState, agentId: string): string 
 
 function text(value: unknown, max: number): string | null {
   return typeof value === "string" && value.length <= max ? value : null;
+}
+/** A saved moment (ms since the epoch), or undefined. */
+function time(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 function list(value: unknown, max: number): unknown[] {
   return Array.isArray(value) ? value.slice(0, max) : [];
@@ -101,6 +119,8 @@ function tool(value: unknown): ToolCard | null {
   if (reason) card.reason = reason;
   if (typeof item.durationMs === "number" && Number.isFinite(item.durationMs))
     card.durationMs = Math.max(0, item.durationMs);
+  const startedAt = time(item.startedAt);
+  if (startedAt !== undefined) card.startedAt = startedAt;
   const details: ToolDetails = card;
   const command = text(item.command, TOOL_OUTPUT_LIMIT);
   if (command !== null) details.command = command;
@@ -162,7 +182,12 @@ export function parseTranscript(json: string, agentId: string): Snapshot | null 
     const id = text(item.id, 64);
     const body = text(item.text, TOOL_OUTPUT_LIMIT);
     if (!id || body === null) return [];
-    const thought: Thought = { id, text: body, startedAt: 0, running: false };
+    const thought: Thought = {
+      id,
+      text: body,
+      startedAt: time(item.startedAt) ?? 0,
+      running: false,
+    };
     if (typeof item.durationMs === "number" && Number.isFinite(item.durationMs))
       thought.durationMs = Math.max(0, item.durationMs);
     return [thought];
@@ -186,6 +211,24 @@ export function parseTranscript(json: string, agentId: string): Snapshot | null 
       ? []
       : [{ content, status: String(item.status ?? "pending").slice(0, 32) }];
   });
-  if (timeline.length === 0) return null;
-  return { agentId, messages, timeline, tools, thoughts, plan };
+  const sessionId = text(data.sessionId, 255);
+  const savedOptions = list(data.savedOptions, 8).flatMap((entry) => {
+    const option = record(entry);
+    const id = text(option.id, 256);
+    const value = text(option.value, 256);
+    return id && value ? [{ id, value }] : [];
+  });
+  const draft = text(data.draft, 24 * 1024);
+  if (!draft && !timeline.length && !sessionId && !savedOptions.length) return null;
+  return {
+    agentId,
+    ...(sessionId ? { sessionId } : {}),
+    ...(draft ? { draft } : {}),
+    ...(savedOptions.length ? { savedOptions } : {}),
+    messages,
+    timeline,
+    tools,
+    thoughts,
+    plan,
+  };
 }

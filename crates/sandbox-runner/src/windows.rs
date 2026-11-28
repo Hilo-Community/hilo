@@ -107,6 +107,27 @@ fn environment<'a>(
     environment_for(caller, tmp, true)
 }
 
+/// Denies everything under `directory` except the `keep` paths. The folders leading to a kept
+/// path are walked, not exempted, so their other content stays unreadable.
+fn deny_all_but(
+    directory: &Path,
+    keep: &[PathBuf],
+    denied: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = plain(entry?.path());
+        if keep.contains(&path) {
+            continue;
+        }
+        if keep.iter().any(|kept| kept.starts_with(&path)) {
+            deny_all_but(&path, keep, denied)?;
+        } else {
+            denied.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// The Windows engine: each run gets its own AppContainer profile and Job Object, recorded in a
 /// journal until it has cleaned up after itself.
 #[derive(Debug, Clone)]
@@ -143,14 +164,8 @@ impl AppContainerEngine {
         let root = plain(&spec.worktree_root);
         let mut denied_read_paths: Vec<_> = spec.denied_read_paths.iter().map(plain).collect();
         if spec.mediate_worktree_reads {
-            for entry in fs::read_dir(&spec.worktree_root)? {
-                let path = plain(entry?.path());
-                if !plain(&spec.program).starts_with(&path)
-                    && !plain(&spec.tmp_dir).starts_with(&path)
-                {
-                    denied_read_paths.push(path);
-                }
-            }
+            let keep = [plain(&spec.program), plain(&spec.tmp_dir)];
+            deny_all_but(&spec.worktree_root, &keep, &mut denied_read_paths)?;
         }
         let writable_dirs = std::iter::once(if spec.worktree_read_only {
             plain(&spec.tmp_dir)
@@ -383,6 +398,15 @@ mod tests {
         std::fs::write(&source, "private").unwrap();
         let scratch = root.join("scratch").join("run");
         std::fs::create_dir_all(&scratch).unwrap();
+        // Neighbours of the folders leading to the program and to the scratch directory.
+        let neighbours = [
+            bin.join("other-cli.exe"),
+            root.join("node_modules").join("package.js"),
+            root.join("scratch").join("old-run.log"),
+        ];
+        for neighbour in &neighbours {
+            std::fs::write(neighbour, "private").unwrap();
+        }
         let mut spec = SandboxSpec::new(&root, &program);
         spec.worktree_read_only = true;
         spec.mediate_worktree_reads = true;
@@ -394,6 +418,13 @@ mod tests {
             panic!("AppContainer required")
         };
         assert!(config.denied_read_paths.contains(&plain(&source)));
+        for neighbour in &neighbours {
+            assert!(
+                config.denied_read_paths.contains(&plain(neighbour)),
+                "{} stays readable",
+                neighbour.display()
+            );
+        }
         assert!(config
             .denied_read_paths
             .iter()

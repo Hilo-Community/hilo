@@ -15,10 +15,8 @@
       var(--sidebar-icon-size) +
       var(--sidebar-content-gap)
     );
-    --sidebar-icon-hover: #414141;
   }
 
-  .hilo-zone-2-sidebar,
   .sidebar-navigation {
     position: relative;
   }
@@ -56,7 +54,7 @@
     height: var(--sidebar-row-height);
     margin: 0 var(--sidebar-edge) 2px;
     padding: 0 12px;
-    border: 1px solid var(--color-input-border, #303030);
+    border: 1px solid var(--color-input-border);
     border-radius: 999px;
     background: var(--color-composer);
     /* The CodeMirror field inherits these (its own theme sets `inherit`). */
@@ -98,13 +96,16 @@
     height: var(--sidebar-row-height);
     padding: 0 var(--sidebar-edge);
     border-radius: var(--sidebar-row-radius);
-    color: var(--color-text-primary);
+    color: var(--color-text-secondary);
   }
   .sidebar-row:hover,
   .sidebar-row:has(.sidebar-more[aria-expanded="true"]),
   .sidebar-row:has(.sidebar-add[aria-expanded="true"]),
   .sidebar-row--session[data-selected="true"] {
-    background-color: var(--color-selected);
+    background-color: var(--color-button);
+  }
+  .sidebar-row--session[data-selected="true"] {
+    color: var(--color-text-primary);
   }
   .sidebar-row-select {
     display: flex;
@@ -136,9 +137,40 @@
   .sidebar-row--folder:hover {
     color: var(--color-text-primary);
   }
-  .sidebar-row--folder .sidebar-row-select,
   .sidebar-row--session .sidebar-row-select {
     font-size: 13px;
+  }
+  .sidebar-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  /* With "23 minutes ago" under the title the row grows to two lines; the icon stays by the title. */
+  .sidebar-row--session:has(.sidebar-row-subtitle) {
+    align-items: flex-start;
+    height: auto;
+    min-height: var(--sidebar-row-height);
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .sidebar-row--session:has(.sidebar-row-subtitle) .sidebar-row-select {
+    align-items: flex-start;
+  }
+  /* Centred on the title's line (1.5em tall), not on both lines. */
+  .sidebar-row--session:has(.sidebar-row-subtitle) .sidebar-row-icon {
+    margin-top: calc(0.75em - 6px);
+  }
+  .sidebar-row--session:has(.sidebar-row-subtitle)
+    .sidebar-row-icon:is(:has(.hilo-codex-icon), :has(.hilo-registry-mark)) {
+    margin-top: calc(0.75em - 7px);
+  }
+  .sidebar-row-subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-muted);
+    font-size: 11.5px;
+    line-height: 1.35;
   }
   .sidebar-row--folder .sidebar-more {
     margin-left: auto;
@@ -166,7 +198,7 @@
     width: 6px;
     height: 6px;
     border-radius: 999px;
-    background: var(--color-text-secondary);
+    background: var(--color-status-inactive);
   }
   .sidebar-row-status-dot[data-status="waiting"] {
     background: var(--agent-waiting);
@@ -208,9 +240,10 @@
     cursor: pointer;
   }
   .sidebar-icon-button:hover:not(:disabled),
+  .sidebar-icon-button:focus-visible,
   .sidebar-more[aria-expanded="true"],
   .sidebar-add[aria-expanded="true"] {
-    background: var(--sidebar-icon-hover);
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .sidebar-icon-button:disabled {
@@ -297,7 +330,7 @@
     top: 0;
     bottom: 0;
     width: 1px;
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--color-pill-border);
     pointer-events: none;
     z-index: 1;
   }
@@ -315,6 +348,7 @@
     height: var(--sidebar-row-height);
     padding: 0 var(--sidebar-edge);
     border: 0;
+    border-radius: var(--sidebar-row-radius);
     background: transparent;
     color: var(--color-text-primary);
     font: inherit;
@@ -329,8 +363,9 @@
   .sidebar-open-project-label:not(:disabled) {
     cursor: pointer;
   }
-  .sidebar-open-project-label:hover:not(:disabled) {
-    background: var(--color-selected);
+  .sidebar-open-project-label:hover:not(:disabled),
+  .sidebar-open-project-label:focus-visible {
+    background: var(--color-button);
   }
   .sidebar-open-project-label:focus-visible {
     outline: 1px solid var(--color-text-secondary);
@@ -368,7 +403,6 @@
     font-size: 14px;
     user-select: text;
   }
-  .sidebar-row--folder .sidebar-rename-input,
   .sidebar-row--session .sidebar-rename-input {
     font-size: 13px;
   }
@@ -411,7 +445,7 @@
   .hilo-shell-handle:hover::after,
   .hilo-shell-handle:focus-visible::after,
   .hilo-shell-handle[data-dragging="true"]::after {
-    background: rgba(255, 255, 255, 0.4);
+    background: color-mix(in srgb, var(--agent-card-tint) 40%, transparent);
   }
   /* The panel's scroller: native scrollbar hidden, a thin overlay one is drawn instead. */
   .hilo-zone-2-viewport {
@@ -467,12 +501,12 @@
     padding: 0 8px 4px;
     gap: 8px;
     border: 0;
-    border-bottom: 1px solid var(--color-sidebar-divider, #323231);
+    border-bottom: 1px solid var(--color-sidebar-divider);
     border-radius: 0;
     background: transparent;
   }
   .sidebar-menu-search:focus-within {
-    border-color: var(--color-sidebar-divider, #323231);
+    border-color: var(--color-sidebar-divider);
   }
   .sidebar-menu-search .sidebar-menu-icon {
     align-items: center;
@@ -483,7 +517,6 @@
     width: 16px;
     height: 16px;
   }
-  .sidebar-project-controls [hidden],
   .sidebar-menu-item[hidden] {
     display: none;
   }
@@ -499,7 +532,7 @@
     flex: none;
     width: 14px;
     height: 14px;
-    border: 1px solid var(--color-control-muted, #7f7f7e);
+    border: 1px solid var(--color-control-muted);
     border-radius: 4px;
   }
   [aria-checked="true"] .sidebar-menu-checkbox {
@@ -529,7 +562,7 @@
     border: 0;
     padding: 0;
     background: transparent;
-    color: var(--color-sidebar-highlight, #4cafff);
+    color: var(--color-sidebar-highlight);
     font: inherit;
     cursor: pointer;
   }
@@ -556,7 +589,7 @@
   .sidebar-menu-item:hover:not(:disabled),
   .sidebar-menu-item[aria-expanded="true"],
   .sidebar-menu-item:focus-visible {
-    background: var(--color-button, #252525);
+    background: var(--color-button);
     outline: none;
   }
   .sidebar-menu-item:disabled {
@@ -599,7 +632,7 @@
     color: inherit;
   }
   .sidebar-menu-item--highlighted {
-    color: var(--color-sidebar-highlight, #4cafff);
+    color: var(--color-sidebar-highlight);
   }
   .sidebar-menu-item--highlighted:not(:disabled) .sidebar-menu-icon,
   .sidebar-menu-item--highlighted:hover:not(:disabled) .sidebar-menu-icon {
@@ -619,7 +652,7 @@
   .sidebar-menu-separator {
     height: 1px;
     margin: 3px 6px;
-    background: var(--color-sidebar-divider, #323231);
+    background: var(--color-sidebar-divider);
   }
   .sidebar-icon-button:focus-visible {
     outline: 1px solid var(--color-text-secondary);
@@ -631,6 +664,6 @@
     outline: none;
   }
   .sidebar-row:has(> .sidebar-row-select:focus-visible) {
-    background-color: var(--color-selected);
+    background-color: var(--color-button);
   }
 }

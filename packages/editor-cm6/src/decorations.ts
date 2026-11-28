@@ -17,6 +17,7 @@ import {
   gutterLineClass,
 } from "@codemirror/view";
 import { HILO_STATE_META, type HiloValidationState } from "@hilo/protocol-types";
+import { HILO_STATE_VISUAL_TOKENS } from "./validation-theme.js";
 
 export interface EditorRangeDecoration {
   readonly fromLine: number;
@@ -24,52 +25,6 @@ export interface EditorRangeDecoration {
   readonly state: HiloValidationState;
   readonly snapshotHash: string;
 }
-
-export interface HiloStateVisualTokens {
-  readonly state: HiloValidationState;
-  readonly icon: "✓" | "!" | "✕" | "⟳" | "•";
-  readonly labelFr: string;
-  readonly labelEn: string;
-  readonly labelEs: string;
-  readonly dark: {
-    readonly background: string;
-    readonly border: string;
-    readonly text: string;
-  };
-  readonly light: {
-    readonly background: string;
-    readonly border: string;
-    readonly text: string;
-  };
-}
-
-export const HILO_STATE_VISUAL_TOKENS: Record<HiloValidationState, HiloStateVisualTokens> = {
-  ValidatedGreen: {
-    ...HILO_STATE_META.ValidatedGreen,
-    dark: { background: "#052e16", border: "#22c55e", text: "#86efac" },
-    light: { background: "#dcfce7", border: "#16a34a", text: "#14532d" },
-  },
-  ReviewYellow: {
-    ...HILO_STATE_META.ReviewYellow,
-    dark: { background: "#422006", border: "#eab308", text: "#fde047" },
-    light: { background: "#fef9c3", border: "#ca8a04", text: "#713f12" },
-  },
-  FailedRed: {
-    ...HILO_STATE_META.FailedRed,
-    dark: { background: "#450a0a", border: "#ef4444", text: "#fca5a5" },
-    light: { background: "#fee2e2", border: "#dc2626", text: "#7f1d1d" },
-  },
-  StaleOrange: {
-    ...HILO_STATE_META.StaleOrange,
-    dark: { background: "#431407", border: "#f97316", text: "#fdba74" },
-    light: { background: "#ffedd5", border: "#ea580c", text: "#7c2d12" },
-  },
-  UnchangedBlue: {
-    ...HILO_STATE_META.UnchangedBlue,
-    dark: { background: "#0f172a", border: "#3b82f6", text: "#93c5fd" },
-    light: { background: "#dbeafe", border: "#2563eb", text: "#1e3a8a" },
-  },
-};
 
 export function invalidateRangeOnLocalEdit(
   decoration: EditorRangeDecoration,
@@ -417,19 +372,19 @@ export const hiloThemeExtension = EditorView.baseTheme({
   },
   // 3px left bar in all 5 Hilo states
   ".cm-hilo-gutter-ValidatedGreen": {
-    backgroundColor: "#22c55e",
+    backgroundColor: HILO_STATE_VISUAL_TOKENS.ValidatedGreen.dark.border,
   },
   ".cm-hilo-gutter-ReviewYellow": {
-    backgroundColor: "#eab308",
+    backgroundColor: HILO_STATE_VISUAL_TOKENS.ReviewYellow.dark.border,
   },
   ".cm-hilo-gutter-FailedRed": {
-    backgroundColor: "#ef4444",
+    backgroundColor: HILO_STATE_VISUAL_TOKENS.FailedRed.dark.border,
   },
   ".cm-hilo-gutter-StaleOrange": {
-    backgroundColor: "#f97316",
+    backgroundColor: HILO_STATE_VISUAL_TOKENS.StaleOrange.dark.border,
   },
   ".cm-hilo-gutter-UnchangedBlue": {
-    backgroundColor: "#3b82f6",
+    backgroundColor: HILO_STATE_VISUAL_TOKENS.UnchangedBlue.dark.border,
   },
   // Full-width line wash + gutter wash (line numbers & fold gutter) for all 5 Hilo states
   // Uses !important so `.cm-has-selection .cm-activeLine` never strips the Hilo state background
@@ -439,7 +394,7 @@ export const hiloThemeExtension = EditorView.baseTheme({
     },
   ".cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-ValidatedGreen, .cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-ValidatedGreen.cm-activeLineGutter":
     {
-      color: "#86efac",
+      color: HILO_STATE_VISUAL_TOKENS.ValidatedGreen.dark.text,
     },
   ".cm-hilo-state-ReviewYellow, &.cm-has-selection .cm-activeLine.cm-hilo-state-ReviewYellow, .cm-activeLine.cm-hilo-state-ReviewYellow, .cm-gutterElement.hilo-hunk-gutter-ReviewYellow, &.cm-has-selection .cm-gutterElement.hilo-hunk-gutter-ReviewYellow.cm-activeLineGutter, .cm-gutterElement.hilo-hunk-gutter-ReviewYellow.cm-activeLineGutter":
     {
@@ -447,7 +402,7 @@ export const hiloThemeExtension = EditorView.baseTheme({
     },
   ".cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-ReviewYellow, .cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-ReviewYellow.cm-activeLineGutter":
     {
-      color: "#fde047",
+      color: HILO_STATE_VISUAL_TOKENS.ReviewYellow.dark.text,
     },
   ".cm-hilo-state-FailedRed, &.cm-has-selection .cm-activeLine.cm-hilo-state-FailedRed, .cm-activeLine.cm-hilo-state-FailedRed, .cm-gutterElement.hilo-hunk-gutter-FailedRed, &.cm-has-selection .cm-gutterElement.hilo-hunk-gutter-FailedRed.cm-activeLineGutter, .cm-gutterElement.hilo-hunk-gutter-FailedRed.cm-activeLineGutter":
     {
@@ -455,7 +410,7 @@ export const hiloThemeExtension = EditorView.baseTheme({
     },
   ".cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-FailedRed, .cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-FailedRed.cm-activeLineGutter":
     {
-      color: "#fca5a5",
+      color: HILO_STATE_VISUAL_TOKENS.FailedRed.dark.text,
     },
   ".cm-hilo-state-StaleOrange, &.cm-has-selection .cm-activeLine.cm-hilo-state-StaleOrange, .cm-activeLine.cm-hilo-state-StaleOrange, .cm-gutterElement.hilo-hunk-gutter-StaleOrange, &.cm-has-selection .cm-gutterElement.hilo-hunk-gutter-StaleOrange.cm-activeLineGutter, .cm-gutterElement.hilo-hunk-gutter-StaleOrange.cm-activeLineGutter":
     {
@@ -463,7 +418,7 @@ export const hiloThemeExtension = EditorView.baseTheme({
     },
   ".cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-StaleOrange, .cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-StaleOrange.cm-activeLineGutter":
     {
-      color: "#fdba74",
+      color: HILO_STATE_VISUAL_TOKENS.StaleOrange.dark.text,
     },
   ".cm-hilo-state-UnchangedBlue, &.cm-has-selection .cm-activeLine.cm-hilo-state-UnchangedBlue, .cm-activeLine.cm-hilo-state-UnchangedBlue, .cm-gutterElement.hilo-hunk-gutter-UnchangedBlue, &.cm-has-selection .cm-gutterElement.hilo-hunk-gutter-UnchangedBlue.cm-activeLineGutter, .cm-gutterElement.hilo-hunk-gutter-UnchangedBlue.cm-activeLineGutter":
     {
@@ -471,7 +426,7 @@ export const hiloThemeExtension = EditorView.baseTheme({
     },
   ".cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-UnchangedBlue, .cm-lineNumbers .cm-gutterElement.hilo-hunk-gutter-UnchangedBlue.cm-activeLineGutter":
     {
-      color: "#93c5fd",
+      color: HILO_STATE_VISUAL_TOKENS.UnchangedBlue.dark.text,
     },
 });
 

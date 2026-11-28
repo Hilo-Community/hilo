@@ -503,11 +503,15 @@ describe("settings page", () => {
     };
   }
 
-  it("shows the sidebar with External Agents first, then AI Completion", async () => {
+  it("shows the sidebar with External Agents first, then AI Completion, then Appearance", async () => {
     const { root, cleanup } = mount();
     await settle();
     const labels = [...root.querySelectorAll(".hilo-settings-nav-label")];
-    expect(labels.map((l) => l.textContent)).toEqual(["External Agents", "AI Completion"]);
+    expect(labels.map((l) => l.textContent)).toEqual([
+      "External Agents",
+      "AI Completion",
+      "Appearance",
+    ]);
     expect(root.querySelector(".hilo-settings-subnav")?.textContent).toBe("ACP Registry");
     expect(root.querySelector(".hilo-registry")).not.toBeNull();
     expect(cards(root).map((c) => c.dataset.agent)).toEqual(["a"]);

@@ -1,20 +1,56 @@
 {
-  "fill" : {
-    "automatic-gradient" : "display-p3:0.99609,0.99609,0.99609,1.00000",
-    "orientation" : {
-      "start" : {
-        "x" : 0.5,
-        "y" : 1
-      },
-      "stop" : {
-        "x" : 0.5,
-        "y" : 0
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:1.00000,1.00000,1.00000,1.00000",
+          "srgb:0.92143,0.92145,0.92144,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
       }
+    },
+    {
+      "appearance" : "dark",
+      "value" : "system-dark"
     }
-  },
+  ],
   "groups" : [
     {
       "layers" : [
+        {
+          "hidden" : true,
+          "image-name" : "SVG Image 7.svg",
+          "name" : "SVG Image 7",
+          "position" : {
+            "scale" : 1.53,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : "none",
+          "hidden" : true,
+          "image-name" : "SVG Image 5.svg",
+          "name" : "SVG Image 5",
+          "position" : {
+            "scale" : 1.69,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
         {
           "fill-specializations" : [
             {
@@ -23,19 +59,17 @@
             {
               "appearance" : "dark",
               "value" : "system-light"
-            },
-            {
-              "appearance" : "tinted",
-              "value" : "system-dark"
             }
           ],
-          "image-name" : "SVG Image 3.svg",
-          "name" : "SVG Image 3",
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "SVG Image 8.svg",
+          "name" : "SVG Image 8",
           "position" : {
-            "scale" : 1,
+            "scale" : 1.59,
             "translation-in-points" : [
-              0.39999999999997726,
-              16
+              0,
+              0
             ]
           }
         }

@@ -76,6 +76,8 @@ pub(crate) struct DesktopAppState {
     pub(crate) unsaved_buffers: AtomicUsize,
     /// Set once the user has answered the close prompt, so the exit that follows goes through.
     pub(crate) exit_confirmed: AtomicBool,
+    /// The main window can flush its session data before a normal exit.
+    pub(crate) close_handler_ready: AtomicBool,
     /// Inline AI completion through the model gateway (strict local mode).
     pub(crate) completion: crate::commands::completion::CompletionState,
     /// The Judge: proposals being verified, reviews, planned accepts, stale ranges (`LOT-015`).
@@ -125,6 +127,7 @@ impl DesktopAppState {
             index_build: Mutex::new(()),
             unsaved_buffers: AtomicUsize::new(0),
             exit_confirmed: AtomicBool::new(false),
+            close_handler_ready: AtomicBool::new(false),
             completion,
             judge: crate::commands::judge::JudgeState::new(),
             publish_client: Mutex::new(None),
@@ -182,7 +185,8 @@ impl DesktopAppState {
     /// Whether closing the window or quitting must first ask the UI what to do with unsaved edits.
     pub(crate) fn close_needs_confirmation(&self) -> bool {
         !self.exit_confirmed.load(Ordering::SeqCst)
-            && self.unsaved_buffers.load(Ordering::SeqCst) > 0
+            && (self.close_handler_ready.load(Ordering::SeqCst)
+                || self.unsaved_buffers.load(Ordering::SeqCst) > 0)
     }
 }
 

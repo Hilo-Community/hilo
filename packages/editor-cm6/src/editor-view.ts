@@ -37,6 +37,11 @@ import {
   setSourceDiagnosticsEffect,
 } from "./diagnostics.js";
 import { createEditorState } from "./editor-state.js";
+import {
+  DEFAULT_HILO_CM6_THEME,
+  type DeclarativeVsixTheme,
+  createThemeExtension,
+} from "./editor-theme.js";
 import { InlineCompletionClient, type InlineCompletionProvider } from "./inline-completion.js";
 import {
   LanguageFeatureClient,
@@ -46,14 +51,11 @@ import {
 import { createLezerHighlightingExtensions, detectLanguageFromPath } from "./languages.js";
 import {
   type Cm6TranslatedKeybinding,
-  DEFAULT_HILO_CM6_THEME,
   type DeclarativeVsixBundle,
   type DeclarativeVsixSnippet,
-  type DeclarativeVsixTheme,
   KEYMAP_PRESET_BINDINGS,
   type KeymapPresetId,
   createKeymapExtension,
-  createThemeExtension,
   renderSnippetTemplate,
 } from "./onboarding-vsix.js";
 

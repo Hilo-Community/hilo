@@ -3,8 +3,11 @@
   position: relative;
   --sidebar-edge: 12px;
   /* The size, spacing and colour of what is read: messages and thoughts share them. */
-  --agent-reading-size: 13px;
+  --agent-reading-size: 14px;
   --agent-reading-line: 1.6;
+  /* One line of activity ("Worked for 10s", "Thought for 3s", "Ran …"): same height everywhere. */
+  --agent-row-height: 30px;
+  --agent-row-gap: 2px;
   --agent-reading-color: var(--color-text-primary);
   --agent-content-width: 820px;
   display: flex;
@@ -25,14 +28,14 @@
   padding: 8px;
   margin: 4px 0;
   color: inherit;
-  background: var(--color-topbar, #252526);
-  border: 1px solid var(--color-border, #555);
+  background: var(--color-composer);
+  border: 1px solid var(--color-input-border);
   user-select: text;
 }
 .hilo-agent-panel button {
   color: inherit;
   background: transparent;
-  border: 1px solid var(--color-border, #555);
+  border: 1px solid var(--color-button-border);
   padding: 4px 8px;
   margin: 4px;
   cursor: pointer;
@@ -70,7 +73,7 @@
 .hilo-agent-output article code {
   padding: 1px 4px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-overlay-medium);
   font-family: var(--font-terminal);
   font-size: 0.92em;
 }
@@ -93,7 +96,7 @@
   text-align: left;
 }
 .hilo-agent-output article th {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-overlay-subtle);
   font-weight: 600;
 }
 .hilo-agent-output pre {
@@ -133,13 +136,16 @@
   min-height: 38px;
   margin: 0 auto;
   padding: 6px 7px 6px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--color-input-border);
   border-radius: 24px;
-  /* The sidebar's gray, as the reference composer uses. */
-  background: var(--color-sidebar, #212121);
+  background: var(--color-composer);
 }
 .hilo-agent-composer:focus-within {
   border-color: rgba(255, 255, 255, 0.18);
+}
+[data-theme="light"] .hilo-agent-composer,
+[data-theme="light"] .hilo-agent-composer:focus-within {
+  border-color: var(--color-input-border);
 }
 /* The text field is a small CodeMirror view (editor-cm6 createPromptInput), so the caret is
    CodeMirror's thin one rather than the system's. */
@@ -184,30 +190,6 @@
   padding: 0;
   margin-bottom: 0;
 }
-/* The agent, where the reference has its model picker: 24px tall, 8px left and 6px right. */
-.hilo-agent-who {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 6px 0 8px;
-  margin-right: auto;
-  color: var(--color-text-secondary, #878888);
-  font-size: 13px;
-}
-.hilo-agent-who .hilo-registry-mark {
-  width: 16px;
-  height: 16px;
-}
-.hilo-agent-who .hilo-registry-mark svg {
-  width: 15px;
-  height: 15px;
-}
-.hilo-agent-who .hilo-registry-mark--letter {
-  width: 16px;
-  height: 16px;
-  font-size: 10px;
-}
 .hilo-agent-panel .hilo-agent-send,
 .hilo-agent-panel .hilo-agent-stop {
   display: inline-flex;
@@ -220,11 +202,11 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: #f2f2f2;
-  color: #111;
+  background: var(--color-text-primary);
+  color: var(--color-text-inverse);
 }
 .hilo-agent-panel .hilo-agent-send:disabled {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--color-button);
   color: rgba(255, 255, 255, 0.4);
   opacity: 1;
 }
@@ -248,6 +230,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  color: var(--color-text-muted);
+}
+.hilo-agent-sandbox svg {
+  color: var(--color-control-muted);
 }
 .hilo-agent-busy[hidden] {
   display: none;
@@ -283,9 +269,16 @@
   height: 24px;
   margin: 0;
   padding: 0 10px;
-  border: 0.5px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--color-button-border);
   border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
   font-size: 11px;
+}
+.hilo-agent-panel .hilo-agent-connect:hover:not(:disabled),
+.hilo-agent-panel .hilo-agent-connect:focus-visible {
+  background: var(--color-button);
+  color: var(--color-text-primary);
 }
 @media (prefers-reduced-motion: reduce) {
   .hilo-agent-busy svg {
@@ -304,21 +297,10 @@
 .hilo-agent-panel {
   container-type: inline-size;
 }
-.hilo-agent-who {
-  margin-right: 0;
-}
 .hilo-agent-meta,
 .hilo-agent-status {
   padding-inline: 6px;
 }
-/* A narrow panel keeps the logo and drops the agent's name. */
-@container (max-width: 420px) {
-  .hilo-agent-who {
-    font-size: 0;
-    gap: 0;
-  }
-}
-
 /* How to sign in: at the bottom, above the composer, flat, as wide as the composer. */
 .hilo-agent-auth-bar {
   box-sizing: border-box;
@@ -364,14 +346,15 @@
   height: 24px;
   margin: 0;
   padding: 0 12px;
-  border: 0.5px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--color-button-border);
   border-radius: 6px;
   background: transparent;
   font-size: 11px;
   white-space: nowrap;
 }
-.hilo-agent-panel .hilo-agent-auth-choice-actions button:hover {
-  background: rgba(255, 255, 255, 0.05);
+.hilo-agent-panel .hilo-agent-auth-choice-actions button:hover:not(:disabled),
+.hilo-agent-panel .hilo-agent-auth-choice-actions button:focus-visible {
+  background: var(--color-button);
 }
 
 /* Sign-in prompts at the bottom: the same content as the centered card, flat and left-aligned. */
@@ -659,6 +642,7 @@
   padding: 0 7px;
   text-align: right;
   color: var(--color-text-muted);
+  -webkit-user-select: none;
   user-select: none;
 }
 .hilo-agent-diff-text {
@@ -1010,6 +994,7 @@
   flex: 0 0 22px;
   width: 22px;
   color: var(--color-text-muted);
+  -webkit-user-select: none;
   user-select: none;
 }
 .hilo-agent-diff-line[data-kind="+"] .hilo-agent-diff-prefix {
@@ -1146,8 +1131,9 @@
   cursor: pointer;
 }
 .hilo-agent-panel .hilo-agent-option:hover:enabled,
+.hilo-agent-panel .hilo-agent-option:focus-visible,
 .hilo-agent-panel .hilo-agent-option[aria-expanded="true"] {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-button);
   color: var(--color-text-primary);
 }
 .hilo-agent-panel .hilo-agent-option:disabled {
@@ -1235,6 +1221,50 @@
 .hilo-agent-output article li > .hilo-agent-ref:first-of-type {
   margin-left: 2px;
 }
+/* Markers a little quieter than the text, numbers aligned. */
+.hilo-agent-output article li::marker {
+  color: var(--color-text-muted);
+}
+.hilo-agent-output article ol > li {
+  padding-left: 2px;
+}
+.hilo-agent-output article ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+/* A nested list sits tight under its item; a paragraph inside a loose item adds no gap. */
+.hilo-agent-output article li > ul,
+.hilo-agent-output article li > ol {
+  margin: 4px 0 0;
+}
+.hilo-agent-output article li > p {
+  margin: 0;
+}
+.hilo-agent-output article li > p + p {
+  margin-top: 6px;
+}
+.hilo-agent-output article ul ul {
+  list-style: circle;
+}
+.hilo-agent-output article blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--color-overlay-medium);
+  color: var(--color-text-muted);
+}
+.hilo-agent-output article blockquote > :last-child {
+  margin-bottom: 0;
+}
+.hilo-agent-output article hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--color-overlay-medium);
+}
+.hilo-agent-output article s {
+  color: var(--color-text-muted);
+}
+.hilo-agent-output article > :last-child {
+  margin-bottom: 0;
+}
 
 /* The thinking block: the label and, right after it, a small chevron. Muted until the pointer is
    over it. */
@@ -1276,4 +1306,328 @@
   > .hilo-agent-card-clip
   > .hilo-agent-card-body {
   padding-top: 8px;
+}
+
+/* A group of work between two messages: chevron first, then "Working…" / "Worked for 10s". */
+.hilo-agent-work > .hilo-agent-card-header > .hilo-agent-card-icon {
+  display: none;
+}
+.hilo-agent-work > .hilo-agent-card-header > .hilo-agent-card-chevron {
+  order: -1;
+  margin: 0 6px 0 0;
+}
+.hilo-agent-panel .hilo-agent-work > .hilo-agent-card-header {
+  min-height: 28px;
+  color: var(--color-text-muted);
+  font-size: var(--agent-reading-size);
+}
+.hilo-agent-work > .hilo-agent-card-header:hover:enabled {
+  background: none;
+  color: var(--color-text-primary);
+}
+/* A failed step is red in its own row; the group's header stays quiet. */
+.hilo-agent-work[data-status="failed"] > .hilo-agent-card-header .hilo-agent-card-verb,
+.hilo-agent-work[data-status="denied"] > .hilo-agent-card-header .hilo-agent-card-verb {
+  color: inherit;
+}
+.hilo-agent-output > .hilo-agent-work {
+  margin: 2px 0 10px;
+}
+
+/* Where the turn is now, under the latest step: "Thinking…" or "Exploring…", shimmering. */
+.hilo-agent-live {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  margin: 2px 0 8px;
+  color: var(--color-text-muted);
+  font-size: var(--agent-reading-size);
+}
+/*
+ * "Thinking…", "Working…": a band of light sweeps across the words themselves, left to right, one
+ * pass every 1.8s. The text is the gradient (clipped to the glyphs), so it stays crisp and readable
+ * at every moment; only the brightness moves.
+ */
+.hilo-agent-live-label,
+.hilo-agent-activity[data-status="running"] > .hilo-agent-card-header .hilo-agent-card-verb {
+  --shimmer-base: var(--color-text-muted);
+  --shimmer-peak: var(--color-text-primary);
+  background-image: linear-gradient(
+    90deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 38%,
+    var(--shimmer-peak) 50%,
+    var(--shimmer-base) 62%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: hilo-agent-text-shimmer 1.8s linear infinite;
+}
+/* The older mask dimmed the whole header; the sweep replaces it on these lines. */
+.hilo-agent-activity[data-status="running"] > .hilo-agent-card-header > .hilo-agent-card-copy {
+  mask-image: none;
+  animation: none;
+}
+@keyframes hilo-agent-text-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hilo-agent-live-label,
+  .hilo-agent-activity[data-status="running"] > .hilo-agent-card-header .hilo-agent-card-verb {
+    animation: none;
+    background-image: none;
+    color: var(--color-text-muted);
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* Inside a work group each tool is one quiet line of text ("Ran cat …"); unfolding it shows its
+   card (the command and its output) below the line, rounded. */
+.hilo-agent-work .hilo-agent-tool {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.hilo-agent-panel .hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header {
+  min-height: 26px;
+  padding: 2px 0;
+  border-radius: 0;
+  color: var(--color-text-muted);
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header > .hilo-agent-card-icon,
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header > .hilo-agent-card-extra {
+  display: none;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-copy {
+  gap: 0.3em;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-verb,
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-target,
+.hilo-agent-work
+  .hilo-agent-tool[data-open="true"]
+  > .hilo-agent-card-header
+  .hilo-agent-card-target {
+  display: inline;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--agent-reading-size);
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header:hover:enabled {
+  color: var(--color-text-primary);
+}
+.hilo-agent-work
+  .hilo-agent-tool[data-status="failed"]
+  > .hilo-agent-card-header
+  .hilo-agent-card-verb,
+.hilo-agent-work
+  .hilo-agent-tool[data-status="denied"]
+  > .hilo-agent-card-header
+  .hilo-agent-card-verb {
+  color: var(--agent-failed);
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header > .hilo-agent-card-chevron {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header:hover > .hilo-agent-card-chevron,
+.hilo-agent-work
+  .hilo-agent-tool[data-open="true"]
+  > .hilo-agent-card-header
+  > .hilo-agent-card-chevron {
+  opacity: 1;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-disclosure .hilo-agent-card-clip {
+  border-radius: 0;
+}
+.hilo-agent-work .hilo-agent-tool > .hilo-agent-card-disclosure .hilo-agent-card-body {
+  margin: 4px 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--card-border, color-mix(in srgb, var(--agent-card-tint) 9%, transparent));
+  border-radius: 10px;
+  background: var(--card-body, var(--color-overlay-subtle));
+}
+
+/* "Worked for 10s" and "Thought for 3s" read at the size of the conversation, like the rows of
+   tools beside them, not as small print. */
+.hilo-agent-work > .hilo-agent-card-header .hilo-agent-card-copy,
+.hilo-agent-thinking > .hilo-agent-card-header .hilo-agent-card-copy {
+  font-size: var(--agent-reading-size);
+}
+.hilo-agent-work > .hilo-agent-card-header .hilo-agent-card-chevron svg,
+.hilo-agent-thinking > .hilo-agent-card-header .hilo-agent-card-chevron svg {
+  width: 15px;
+  height: 15px;
+}
+/* A step that was stopped or failed is marked in its own row, not on the group's header. */
+.hilo-agent-work > .hilo-agent-card-header > .hilo-agent-card-state {
+  display: none;
+}
+
+/* The user's own message: a rounded bubble on the right, as in a chat. */
+.hilo-agent-output article[data-role="user"] {
+  width: fit-content;
+  max-width: min(80%, 620px);
+  margin: 18px 0 18px auto;
+  padding: 9px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.hilo-agent-output article[data-role="user"]:first-child {
+  margin-top: 4px;
+}
+.hilo-agent-output article.hilo-markdown[data-role="user"] > * {
+  margin: 0;
+}
+.hilo-agent-output article.hilo-markdown[data-role="user"] > * + * {
+  margin-top: 8px;
+}
+
+/* A thought on its own, between messages, lines up with "Worked for": its chevron comes first. */
+.hilo-agent-output > .hilo-agent-thinking > .hilo-agent-card-header > .hilo-agent-card-chevron {
+  order: -1;
+  margin: 0 6px 0 0;
+}
+.hilo-agent-output > .hilo-agent-thinking > .hilo-agent-card-header > .hilo-agent-card-icon {
+  display: none;
+}
+
+/*
+ * One rhythm for every line of activity, alone or inside a group: the same size as the text, the
+ * same height, no stray margins, and the text of every row in one column. Blocks (a group, a lone
+ * thought) keep the same space from the text above and below them.
+ */
+.hilo-agent-panel .hilo-agent-output > .hilo-agent-activity,
+.hilo-agent-panel .hilo-agent-output > .hilo-agent-work {
+  margin: 6px 0 10px;
+}
+.hilo-agent-panel .hilo-agent-work .hilo-agent-card-body > .hilo-agent-card {
+  margin: 0 0 var(--agent-row-gap);
+}
+.hilo-agent-panel .hilo-agent-activity > .hilo-agent-card-header,
+.hilo-agent-panel .hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header {
+  min-height: var(--agent-row-height);
+  padding: 0;
+  gap: 6px;
+  line-height: 1.4;
+}
+.hilo-agent-panel .hilo-agent-activity > .hilo-agent-card-header .hilo-agent-card-copy,
+.hilo-agent-panel .hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-copy,
+.hilo-agent-panel .hilo-agent-work .hilo-agent-tool > .hilo-agent-card-header .hilo-agent-card-verb,
+.hilo-agent-panel
+  .hilo-agent-work
+  .hilo-agent-tool
+  > .hilo-agent-card-header
+  .hilo-agent-card-target {
+  font-size: var(--agent-reading-size);
+}
+/* Inside a group: the rows start at the guide line's indent, with no icon of their own. */
+.hilo-agent-panel
+  .hilo-agent-work
+  .hilo-agent-card-body
+  > .hilo-agent-thinking
+  > .hilo-agent-card-header
+  > .hilo-agent-card-icon {
+  display: none;
+}
+.hilo-agent-work > .hilo-agent-card-disclosure > .hilo-agent-card-clip > .hilo-agent-card-body {
+  margin: 0 0 4px 7px;
+  padding: 2px 0 2px 16px;
+}
+/* A thought's text, opened inside a group, reads like the rest: indented under its row. */
+.hilo-agent-panel
+  .hilo-agent-work
+  .hilo-agent-thinking
+  > .hilo-agent-card-disclosure
+  .hilo-agent-card-body {
+  padding: 2px 0 8px;
+}
+/* The live line sits on the same rhythm. */
+.hilo-agent-live {
+  min-height: var(--agent-row-height);
+  margin: 6px 0 10px;
+}
+
+/* Under a finished answer: Copy and Retry as small round buttons, and how long the turn took.
+   It fades in once the turn ends, as the answer settles. */
+.hilo-agent-response-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 0 16px -6px;
+  animation: hilo-agent-actions-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action:hover,
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action:focus-visible {
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  color: var(--color-text-primary);
+}
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action:active {
+  transform: scale(0.95);
+}
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action[data-copied] {
+  color: var(--agent-done, #4ade80);
+}
+.hilo-agent-panel .hilo-agent-response-actions > .hilo-agent-response-action[hidden] {
+  display: none;
+}
+.hilo-agent-response-actions > .hilo-agent-turn-time {
+  margin: 0 0 0 8px;
+  font-size: 12.5px;
+}
+@keyframes hilo-agent-actions-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hilo-agent-response-actions {
+    animation-duration: 120ms;
+    animation-name: hilo-agent-actions-fade;
+  }
+}
+@keyframes hilo-agent-actions-fade {
+  from {
+    opacity: 0;
+  }
 }

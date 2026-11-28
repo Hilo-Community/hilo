@@ -12,5 +12,11 @@ export const SETTINGS_SECTIONS = [
     groups: ["Local model"],
     keywords: "ollama local model completion qwen suggestions privacy offline",
   },
+  {
+    id: "appearance",
+    label: "Appearance",
+    groups: ["Theme"],
+    keywords: "appearance theme dark light color colors palette",
+  },
 ] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];

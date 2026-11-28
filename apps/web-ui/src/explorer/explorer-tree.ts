@@ -162,7 +162,8 @@ export class ExplorerTreeRenderer {
       const badge = doc.createElement("span");
       badge.className = "explorer-state cm-hilo-tree-state-badge";
       badge.textContent = token.icon;
-      badge.style.color = token.darkText;
+      badge.style.color =
+        doc.documentElement.dataset.theme === "light" ? token.lightText : token.darkText;
       badge.setAttribute("role", "img");
       badge.setAttribute("aria-label", token.labelEn);
       row.append(badge);

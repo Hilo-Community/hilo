@@ -124,20 +124,20 @@
   justify-content: center;
   gap: 8px;
 }
-/* Small, hairline outline, no fill: the Connect button of this panel and the buttons of
-   Settings. The panel's generic square buttons are overridden here. */
+/* Use the same secondary colors as the panel's Connect button. */
 .hilo-agent-panel .hilo-agent-authentication button {
   height: 24px;
   margin: 0;
   padding: 0 12px;
-  border: 0.5px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--color-button-border);
   border-radius: 6px;
   background: transparent;
   font-size: 11px;
   white-space: nowrap;
 }
-.hilo-agent-panel .hilo-agent-authentication button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+.hilo-agent-panel .hilo-agent-authentication button:hover:not(:disabled),
+.hilo-agent-panel .hilo-agent-authentication button:focus-visible {
+  background: var(--color-button);
 }
 
 .hilo-agent-terminal-login {

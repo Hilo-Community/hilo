@@ -34,7 +34,7 @@ import {
   MENU_TRASH_ICON,
 } from "./menu-icons.js";
 import { type MenuEntry, SidebarMenu } from "./sidebar-menu.js";
-import { SidebarRow } from "./sidebar-row.js";
+import { SidebarRow, relativeTime } from "./sidebar-row.js";
 
 type SessionFilter = "workspace" | "status" | "updated";
 
@@ -199,11 +199,9 @@ export class WorkspaceSidebar {
         if (next.activeChatId !== prev.activeChatId || next.chats !== prev.chats) this.update();
       }),
     );
-    // Relative date filters age without any store change.
+    // "23 minutes ago" ages without any store change.
     const view = doc.defaultView;
-    const timer = view?.setInterval(() => {
-      if (this.sessionFilters.has("updated")) this.update();
-    }, 60_000);
+    const timer = view?.setInterval(() => this.update(), 60_000);
     if (timer !== undefined) this.unsubscribers.push(() => view?.clearInterval(timer));
   }
 
@@ -217,7 +215,12 @@ export class WorkspaceSidebar {
 
   /** Closes sessions one by one. */
   private closeSessions(chatIds: readonly string[]): void {
-    for (const id of chatIds) this.options.stores.closeChat(id);
+    const { stores } = this.options;
+    for (const id of chatIds) {
+      const chat = stores.zone3.getState().chats.find((item) => item.chatId === id);
+      if (chat?.kind === "agent" && chat.agentId) stores.hideChatPanel(id);
+      else stores.closeChat(id);
+    }
   }
 
   /** A new session (or terminal) in a group, next to `from` when given. */
@@ -357,7 +360,12 @@ export class WorkspaceSidebar {
     const row = new SidebarRow(doc, {
       kind: "group",
       icon: GROUP_ICON,
-      onSelect: () => this.withProject(projectPath, () => stores.selectWorkGroup(group.id)),
+      // A tab shows all its sessions tiled; picking one session below shows it alone.
+      onSelect: () =>
+        this.withProject(projectPath, () => {
+          stores.selectWorkGroup(group.id);
+          stores.showGroupTiled(group.id);
+        }),
       onAdd: (anchor) => {
         // With terminals available the "+" offers the same choices as the one of the panels.
         if (this.options.newSessionKind === "terminal") {
@@ -453,7 +461,8 @@ export class WorkspaceSidebar {
     const row = new SidebarRow(treeHost.ownerDocument, {
       kind: "session",
       onSelect: () => {
-        this.withProject(projectPath, () => stores.selectChat(chat.chatId));
+        // Shown alone and selected; picking it again while alone shows its whole group.
+        this.withProject(projectPath, () => stores.toggleMaximizeChat(chat.chatId));
       },
       onMore: (anchor) => {
         const state = stores.zone3.getState();
@@ -485,7 +494,10 @@ export class WorkspaceSidebar {
             run: () => this.withProject(projectPath, () => stores.toggleMaximizeChat(chat.chatId)),
           },
           {
-            label: UI_STRINGS.sidebar.closeSession,
+            label:
+              latest.kind === "agent" && latest.agentId
+                ? UI_STRINGS.sidebar.deleteChat
+                : UI_STRINGS.sidebar.closeSession,
             icon: MENU_CLOSE_ICON,
             separatorBefore: true,
             danger: true,
@@ -793,6 +805,9 @@ export class WorkspaceSidebar {
           row.setIcon(sessionIcon(chat));
           row.setStatusDot(sessionStatusDot(chat));
           row.update(chat.title, groupActive && chatState.activeChatId === id);
+          row.setSubtitle(
+            chat.lastActiveAt === undefined ? null : relativeTime(chat.lastActiveAt, now),
+          );
           const running =
             sessionStatusDot(chat) === "running" ||
             (chat.kind === "terminal" &&

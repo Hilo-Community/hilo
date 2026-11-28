@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
+import { promptInputOf } from "@hilo/editor-cm6";
 import { describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./panel.js";
-import { type AgentHost, type AgentState, AgentStore } from "./store.js";
+import { type AcpEvent, type AgentHost, type AgentState, AgentStore } from "./store.js";
 import { parseTranscript, serializeTranscript } from "./transcript.js";
 
 const event = (update: Record<string, unknown>) => ({ type: "update" as const, update });
@@ -56,6 +57,28 @@ describe("saved conversations", () => {
       status: "done",
     });
     expect(json).not.toContain("<p>");
+  });
+  it("keeps when each tool and thought started, so a restored group says how long it worked", () => {
+    const store = new AgentStore(
+      (callback) => callback(),
+      () => 5_000,
+    );
+    store.enqueue({ type: "message", role: "user", text: "go" });
+    store.enqueue(chunk("Looking"));
+    store.enqueue(
+      event({
+        sessionUpdate: "tool_call",
+        toolCallId: "r",
+        kind: "execute",
+        title: "ls",
+        status: "completed",
+      }),
+    );
+    const saved = parseTranscript(serializeTranscript(store.getState(), "codex") ?? "", "codex");
+    expect(saved?.tools[0]?.startedAt).toBe(5_000);
+    const hostile = JSON.parse(serializeTranscript(store.getState(), "codex") ?? "{}");
+    hostile.tools[0].startedAt = "soon";
+    expect(parseTranscript(JSON.stringify(hostile), "codex")?.tools[0]?.startedAt).toBeUndefined();
   });
   it("keeps nothing for an empty panel, and nothing of another agent", () => {
     expect(serializeTranscript(new AgentStore().getState(), "codex")).toBeNull();
@@ -159,12 +182,239 @@ describe("a panel and its saved conversation", () => {
     await settle();
     expect(transcripts.load).toHaveBeenCalledWith("chat-1");
     expect(panel.store.getState().messages).toHaveLength(3);
-    expect(panel.element.textContent).toContain("does not remember it");
+    expect(panel.element.textContent).toContain("gets a summary of it");
     panel.activate();
     await settle();
     expect(panel.store.getState().messages).toHaveLength(3);
     panel.destroy();
   });
+  it("restores Copilot's session ID from disk before starting the connection", async () => {
+    const original = conversation();
+    original.enqueue({ type: "ready", sessionId: "saved-copilot-session" });
+    original.enqueue({
+      type: "options",
+      options: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          current: "fast",
+          choices: [{ name: "Fast", value: "fast" }],
+        },
+      ],
+    });
+    const json = serializeTranscript(original.getState(), "github-copilot-cli");
+    const { host } = setup(json);
+    const panel = new AgentPanel(
+      document,
+      host,
+      async () => undefined,
+      { agentId: "github-copilot-cli", name: "Copilot" },
+      true,
+      new AgentStore((callback) => callback()),
+      { chatId: "copilot-chat", restore: true, cwd: "/projects/copilot" },
+    );
+    await settle();
+    expect(panel.store.getState().messages).toHaveLength(3);
+    expect(panel.element.textContent).not.toContain("gets a summary of it");
+    expect(host.start).toHaveBeenCalledExactlyOnceWith(
+      {
+        installedAgentId: "github-copilot-cli",
+        conversationId: "copilot-chat",
+        expectedWorkspace: "/projects/copilot",
+        resumeSessionId: "saved-copilot-session",
+        preferredOptions: [{ id: "model", value: "fast" }],
+      },
+      expect.any(Function),
+    );
+    panel.destroy();
+  });
+
+  it("opens a saved chat without connecting and supplies history only to the first fallback prompt", async () => {
+    const original = conversation();
+    original.enqueue({ type: "ready", sessionId: "old-session" });
+    const { host } = setup(serializeTranscript(original.getState(), "codex"));
+    const store = new AgentStore((callback) => callback());
+    const panel = new AgentPanel(
+      document,
+      host,
+      async () => undefined,
+      { agentId: "codex", name: "Codex" },
+      false,
+      store,
+      { chatId: "chat-1", restore: true },
+    );
+    await settle();
+    expect(store.getState().messages).toHaveLength(3);
+    expect(host.start).not.toHaveBeenCalled();
+    const send = (text: string) => {
+      promptInputOf(panel.element.querySelector(".hilo-agent-composer .cm-editor"))?.setText(text);
+      panel.element.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    };
+    send("continue");
+    await settle();
+    const handle = await vi.mocked(host.start).mock.results[0]?.value;
+    expect(handle?.prompt).not.toHaveBeenCalled();
+    store.enqueue({ type: "ready", sessionId: "replacement" });
+    await settle();
+    expect(handle?.prompt).toHaveBeenCalledExactlyOnceWith(
+      "continue",
+      expect.stringContaining("analyze"),
+    );
+    store.setState((state) => ({ ...state, busy: false }));
+    send("next");
+    await settle();
+    expect(handle?.prompt).toHaveBeenLastCalledWith("next");
+    panel.destroy();
+  });
+
+  /** A restored chat whose agent start is observable: every connection's event callback. */
+  function liveRestore(sessionId: string) {
+    const original = conversation();
+    original.enqueue({ type: "ready", sessionId });
+    const { host } = setup(serializeTranscript(original.getState(), "codex"));
+    const connections: Array<{
+      emit: (event: AcpEvent) => void;
+      prompt: ReturnType<typeof vi.fn>;
+    }> = [];
+    host.start = vi.fn(async (_config, onEvent) => {
+      const prompt = vi.fn(async () => undefined);
+      connections.push({ emit: onEvent, prompt });
+      return { prompt, cancel: vi.fn(), stop: vi.fn(async () => undefined), answer: vi.fn() };
+    });
+    const store = new AgentStore((callback) => callback());
+    const panel = new AgentPanel(
+      document,
+      host,
+      async () => undefined,
+      { agentId: "codex", name: "Codex" },
+      false,
+      store,
+      { chatId: "chat-1", restore: true, cwd: "/projects/app" },
+    );
+    const send = (text: string) => {
+      promptInputOf(panel.element.querySelector(".hilo-agent-composer .cm-editor"))?.setText(text);
+      panel.element.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    };
+    const retry = () => panel.element.querySelector<HTMLButtonElement>(".hilo-agent-connect");
+    return { host, store, panel, connections, send, retry };
+  }
+
+  it("shows a restored chat like a live one and connects in the background on focus", async () => {
+    const { host, panel, connections, retry } = liveRestore("old-session");
+    await settle();
+    expect(host.start).not.toHaveBeenCalled();
+    expect(retry()?.hidden).toBe(true);
+    expect(panel.element.textContent).not.toContain("Connect");
+    panel.element
+      .querySelector(".hilo-agent-composer .cm-content")
+      ?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await settle();
+    expect(host.start).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ conversationId: "chat-1", resumeSessionId: "old-session" }),
+      expect.any(Function),
+    );
+    connections[0]?.emit({ type: "ready", sessionId: "old-session" });
+    await settle();
+    expect(retry()?.hidden).toBe(true);
+    panel.destroy();
+  });
+
+  it("reconnects silently after an ordinary exit and keeps the same ACP session", async () => {
+    const { host, store, panel, connections, send, retry } = liveRestore("old-session");
+    await settle();
+    send("first");
+    await settle();
+    connections[0]?.emit({ type: "ready", sessionId: "old-session" });
+    await settle();
+    // The saved session was resumed: the agent already has the history, none is attached.
+    expect(connections[0]?.prompt).toHaveBeenCalledExactlyOnceWith("first");
+    store.setState((state) => ({ ...state, busy: false }));
+    connections[0]?.emit({ type: "stopped", reason: "Agent exited", failed: false });
+    await settle();
+    expect(store.getState().error).toBe("");
+    expect(retry()?.hidden).toBe(true);
+
+    send("second");
+    await settle();
+    expect(host.start).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(host.start).mock.calls[1]?.[0]).toMatchObject({
+      resumeSessionId: "old-session",
+    });
+    connections[1]?.emit({ type: "ready", sessionId: "old-session" });
+    await settle();
+    expect(connections[1]?.prompt).toHaveBeenCalledExactlyOnceWith("second");
+    expect(store.getState().messages.some((m) => m.text === "analyze")).toBe(true);
+    panel.destroy();
+  });
+
+  it("shows a failed session with Retry instead of reconnecting by itself", async () => {
+    const { host, store, panel, connections, retry } = liveRestore("old-session");
+    await settle();
+    panel.activate();
+    await settle();
+    connections[0]?.emit({ type: "stopped", reason: "handshake timeout", failed: true });
+    await settle();
+    expect(store.getState().error).toBe("handshake timeout");
+    expect(retry()?.hidden).toBe(false);
+    expect(retry()?.textContent).toBe("Retry");
+    panel.activate();
+    await settle();
+    expect(host.start).toHaveBeenCalledTimes(1);
+    panel.destroy();
+  });
+
+  it("flushes assistant chunks waiting for the next animation frame before exit", async () => {
+    const { host, transcripts } = setup(null);
+    const store = new AgentStore(() => {});
+    const panel = new AgentPanel(
+      document,
+      host,
+      async () => undefined,
+      { agentId: "codex", name: "Codex" },
+      false,
+      store,
+      { chatId: "chat-1", restore: false },
+    );
+    store.enqueue(chunk("chunk received just before exit"));
+    expect(store.getState().messages).toHaveLength(0);
+    await panel.flushTranscript();
+    const json = transcripts.save.mock.calls.at(-1)?.[1];
+    expect(parseTranscript(json ?? "", "codex")?.messages[0]?.text).toBe(
+      "chunk received just before exit",
+    );
+    panel.destroy();
+  });
+
+  it("restores an unsent draft in an empty chat without starting ACP", async () => {
+    const { host, transcripts } = setup(null);
+    const create = (restore: boolean) =>
+      new AgentPanel(
+        document,
+        host,
+        async () => undefined,
+        { agentId: "codex", name: "Codex" },
+        false,
+        new AgentStore((callback) => callback()),
+        { chatId: "chat-1", restore },
+      );
+    const input = (panel: AgentPanel) =>
+      promptInputOf(panel.element.querySelector(".hilo-agent-composer .cm-editor"));
+    const first = create(false);
+    input(first)?.setText("¿Qué cambia en @src/main.ts?");
+    await first.flushTranscript();
+    const json = transcripts.save.mock.calls.at(-1)?.[1] ?? null;
+    expect(json).not.toBeNull();
+    first.destroy();
+    transcripts.load.mockResolvedValueOnce(json);
+    const restored = create(true);
+    await settle();
+    expect(input(restored)?.getText()).toBe("¿Qué cambia en @src/main.ts?");
+    expect(restored.store.getState().messages).toHaveLength(0);
+    expect(host.start).not.toHaveBeenCalled();
+    restored.destroy();
+  });
+
   it("does not load anything for a new panel, and saves what it shows", async () => {
     vi.useFakeTimers();
     const { host, transcripts } = setup("{}");
@@ -181,11 +431,12 @@ describe("a panel and its saved conversation", () => {
     expect(transcripts.load).not.toHaveBeenCalled();
     store.enqueue(chunk("hello"));
     expect(transcripts.save).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(700);
+    await vi.advanceTimersByTimeAsync(700);
     expect(transcripts.save).toHaveBeenCalledTimes(1);
     expect(transcripts.save.mock.calls[0]?.[0]).toBe("chat-2");
     vi.useRealTimers();
     panel.discard();
+    await settle();
     expect(transcripts.remove).toHaveBeenCalledWith("chat-2");
     store.enqueue(chunk(" more"));
     panel.destroy();

@@ -74,7 +74,7 @@ describe("LOT-014 agent panel", () => {
     });
     await settle();
     expect(fake.host.start).toHaveBeenCalledWith(
-      { installedAgentId: "claude-acp" },
+      { installedAgentId: "claude-acp", conversationId: stores.zone3.getState().activeChatId },
       expect.any(Function),
     );
     expect(stores.zone3.getState().chats.at(-1)).toMatchObject({
@@ -86,6 +86,17 @@ describe("LOT-014 agent panel", () => {
       tab.textContent?.includes("Claude Agent"),
     );
     expect(tab?.querySelector(".hilo-registry-mark svg")).not.toBeNull();
+    const chatId = stores.zone3.getState().activeChatId;
+    const agentPanel = root.querySelector(".hilo-agent-panel");
+    tab?.querySelector<HTMLButtonElement>(".hilo-header-tab-close")?.click();
+    expect(root.querySelector(".hilo-agent-panel")).toBeNull();
+    expect(stores.zone3.getState().chats.find((chat) => chat.chatId === chatId)).toMatchObject({
+      panelHidden: true,
+    });
+    stores.selectChat(chatId);
+    expect(root.querySelector(".hilo-agent-panel")).toBe(agentPanel);
+    expect(fake.host.start).toHaveBeenCalledOnce();
+    expect(fake.handle.stop).not.toHaveBeenCalled();
     expect(editor.getEditorView()).toBe(view);
     expect(view.dom.parentElement).toBe(parent);
     cockpit.destroy();
@@ -102,7 +113,7 @@ describe("LOT-014 agent panel", () => {
         agentId: "codex",
         name: "Codex",
       });
-      expect(panel.element.textContent).toContain("Connecting…");
+      expect(panel.element.textContent).not.toContain("Connecting…");
       await settle();
       expect(panel.element.textContent).toContain(reason);
       expect(panel.element.querySelector("input, details")).toBeNull();
@@ -262,8 +273,6 @@ describe("LOT-014 agent panel", () => {
       { installedAgentId: "codex" },
       expect.any(Function),
     );
-    fake.emit({ type: "ready", sessionId: "s" });
-    store.flush();
     expect(panel.element.querySelector("textarea")).toBeNull();
     expect(panel.element.querySelector(".cm-content")?.getAttribute("spellcheck")).toBe("false");
     promptInputOf(panel.element.querySelector(".hilo-agent-composer .cm-editor"))?.setText(
@@ -271,7 +280,12 @@ describe("LOT-014 agent panel", () => {
     );
     panel.element.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
     await settle();
-    expect(fake.handle.prompt).toHaveBeenCalledWith("Repair tests");
+    expect(fake.handle.prompt).not.toHaveBeenCalled();
+    expect(panel.element.textContent).toContain("Reconnecting to the agent…");
+    fake.emit({ type: "ready", sessionId: "s" });
+    store.flush();
+    await settle();
+    expect(fake.handle.prompt).toHaveBeenCalledExactlyOnceWith("Repair tests");
     fake.emit({
       type: "proposedEdit",
       edit: {
@@ -301,6 +315,19 @@ describe("LOT-014 agent panel", () => {
     button(panel.element, "Allow once").click();
     await settle();
     expect(fake.handle.answer).toHaveBeenCalledWith("p", true);
+    fake.emit({
+      type: "permission",
+      id: "agent-choice",
+      reason: "Choose the agent policy",
+      options: [
+        { optionId: "once-id", name: "Allow once", kind: "allow_once" },
+        { optionId: "always-id", name: "Allow for this session", kind: "allow_always" },
+      ],
+    });
+    store.flush();
+    button(panel.element, "Allow for this session").click();
+    await settle();
+    expect(fake.handle.answer).toHaveBeenCalledWith("agent-choice", "always-id");
     button(panel.element, "Cancel").click();
     await settle();
     expect(fake.handle.cancel).toHaveBeenCalledOnce();
@@ -343,10 +370,13 @@ describe("LOT-014 agent panel", () => {
     const instance = editor.getEditorView();
     const parent = instance.dom.parentElement;
     const zone4Updates = stores.zone4.getUpdateCount();
-    const start = button(root, "Connect");
-    expect(start).toBeDefined();
-    start.click();
+    // A restored chat has no Connect step: getting ready to type connects it.
+    expect(button(root, "Connect")).toBeUndefined();
+    root
+      .querySelector(".hilo-agent-composer .cm-content")
+      ?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     await settle();
+    expect(fake.host.start).toHaveBeenCalled();
     for (let i = 0; i < 150; i++) fake.emit(chunk("token "));
     for (const frame of frames.splice(0)) frame(16);
     expect(root.querySelector(".hilo-agent-output")?.textContent).toContain("token");

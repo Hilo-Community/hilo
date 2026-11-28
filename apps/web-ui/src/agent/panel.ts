@@ -1,5 +1,5 @@
-import { type PromptInput, createPromptInput } from "@hilo/editor-cm6";
-import { SPINNER_ICON, agentMark } from "../settings/agent-marks.js";
+import { SPINNER_ICON } from "../settings/agent-marks.js";
+import { ChatComposer } from "../ui/chat-composer.js";
 import { UI_STRINGS } from "../ui/ui-strings.js";
 import { authChoiceCard, authenticationCards } from "./auth-panel.js";
 import { ConversationView } from "./conversation-view.js";
@@ -12,30 +12,31 @@ import { TranscriptKeeper } from "./transcript-keeper.js";
 
 const SVG =
   'xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
-// A heavier stroke than the other icons so the arrow reads at 16px inside the round button.
-// One path, not two: the disabled arrow is translucent and overlapping strokes would show lighter.
-const SEND_ICON = `<svg ${SVG.replace('stroke-width="2"', 'stroke-width="2.75"')}><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
-const STOP_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
 const SANDBOX_ICON = `<svg ${SVG}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`;
-/** The composer grows with its text up to this height, then scrolls. */
-const MAX_COMPOSER_HEIGHT = 220;
-
 /** Generic ACP panel. Its DOM and subscriptions never own or replace the CodeMirror view. */
 export class AgentPanel {
   readonly element: HTMLElement;
   readonly store: AgentStore;
   private handle: AgentHandle | null = null;
   private generation = 0;
+  private disposed = false;
   private starting = false;
+  /**
+   * The agent process of `handle` ended without a failure (it exited between turns, its lease
+   * ran out). The chat keeps looking connected; the next message or focus starts it again and
+   * picks the same ACP session back up.
+   */
+  private lost = false;
+  private pendingPrompt: string | null = null;
+  private priorSessionId: string | undefined;
+  private priorMessages: AgentState["messages"] = [];
+  private restoring: Promise<void> | undefined;
   /** Sign-in requests already opened, so each page opens once per session. */
   private readonly signInOpened = new Set<string>();
   private readonly unsubscribe: () => void;
   private readonly keeper: TranscriptKeeper | null;
-  private readonly prompt: PromptInput;
+  private readonly composer: ChatComposer;
   private readonly start: HTMLButtonElement;
-  private readonly submit: HTMLButtonElement;
-  private readonly cancel: HTMLButtonElement;
   private readonly output: HTMLElement;
   private readonly conversation = new ConversationView();
   private readonly error: HTMLElement;
@@ -45,7 +46,6 @@ export class AgentPanel {
   private readonly options: OptionBar;
   private tick: ReturnType<typeof setInterval> | undefined;
   private readonly login: TerminalLoginView;
-  private readonly form: HTMLFormElement;
   private readonly signInBar: HTMLElement;
   constructor(
     doc: Document,
@@ -55,7 +55,8 @@ export class AgentPanel {
     autoStart = true,
     store = new AgentStore(),
     /** `restore`: the panel comes from a previous run, so its saved conversation is shown. */
-    history?: { chatId: string; restore: boolean },
+    private readonly history?: { chatId: string; restore: boolean; cwd?: string },
+    mentionPaths?: (query: string) => readonly string[],
   ) {
     this.store = store;
     this.keeper =
@@ -70,7 +71,7 @@ export class AgentPanel {
     this.element = doc.createElement("section");
     this.element.className = "hilo-agent-panel";
     this.element.setAttribute("aria-label", identity.name);
-    this.start = this.button(UI_STRINGS.agent.connect, () => void this.begin());
+    this.start = this.button(UI_STRINGS.agent.retry, () => void this.begin());
     this.start.className = "hilo-agent-connect";
     this.output = doc.createElement("div");
     this.output.className = "hilo-agent-output";
@@ -94,48 +95,13 @@ export class AgentPanel {
     this.status = doc.createElement("div");
     this.status.className = "hilo-agent-status";
     this.status.append(this.error, this.start);
-    const form = doc.createElement("form");
-    this.form = form;
-    form.className = "hilo-agent-composer";
-    // Drawn by CodeMirror, not a native textarea: a thin caret like the editor's.
-    // Enter sends, Shift+Enter makes a new line; never while an input method is composing.
-    this.prompt = createPromptInput(form, {
-      placeholder: UI_STRINGS.agent.ask,
-      ariaLabel: UI_STRINGS.agent.prompt,
-      maxLength: 24 * 1024,
-      maxHeight: MAX_COMPOSER_HEIGHT,
-      onSubmit: () => form.requestSubmit(),
-      onFocus: () => this.activate(),
-      // Several lines: the text takes the whole width and the agent and send button go under it.
-      onMultilineChange: (multiline) => form.classList.toggle("is-multiline", multiline),
-    });
-    // Icon-only round buttons; their names stay "Send prompt" and "Cancel" for assistive tech.
-    this.submit = this.button("", () => undefined, "hilo-agent-send");
-    this.submit.type = "submit";
-    this.submit.innerHTML = SEND_ICON;
-    this.submit.setAttribute("aria-label", UI_STRINGS.agent.send);
-    this.cancel = this.button("", () => this.run(() => this.handle?.cancel()), "hilo-agent-stop");
-    this.cancel.innerHTML = STOP_ICON;
-    this.cancel.setAttribute("aria-label", UI_STRINGS.agent.cancel);
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const text = this.prompt.getText().trim();
-      if (!this.handle || !this.store.getState().ready || this.store.getState().busy || !text)
-        return;
-      this.store.setState((s) => ({ ...s, busy: true }));
-      this.run(async () => {
-        await this.handle?.prompt(text);
-        this.prompt.setText("");
-      });
-    });
-    // Who answers, and the send / stop button, on the line under the text.
-    const bar = doc.createElement("div");
-    bar.className = "hilo-agent-bar";
-    const who = doc.createElement("span");
-    who.className = "hilo-agent-who";
-    who.append(agentMark(doc, identity.agentId, identity.name), identity.name);
-    bar.append(who, this.submit, this.cancel);
-    form.append(bar);
+    this.composer = new ChatComposer(
+      doc,
+      (text) => this.submit(text),
+      () => this.run(() => this.handle?.cancel()),
+      mentionPaths,
+      (text) => this.keeper?.changeDraft(text),
+    );
     // The sandbox the agent runs in, and a spinner while it connects or works.
     const meta = doc.createElement("div");
     meta.className = "hilo-agent-meta";
@@ -162,18 +128,45 @@ export class AgentPanel {
     this.signInBar = doc.createElement("div");
     this.signInBar.className = "hilo-agent-auth-bar";
     this.signInBar.hidden = true;
-    this.element.append(this.output, this.signInBar, this.status, form, meta);
+    this.element.append(this.output, this.signInBar, this.status, this.composer.element, meta);
+    // Getting ready to type is the user's signal: connect in the background meanwhile, so a
+    // restored chat answers its first message as fast as a live one.
+    this.composer.element.addEventListener("focusin", () => this.activate());
     this.unsubscribe = store.subscribe(() => {
-      this.render();
       this.keeper?.changed();
+      this.sendPending();
+      this.render();
     });
     this.render();
-    if (history?.restore) this.keeper?.restore();
+    if (history?.restore) {
+      this.restoring = this.keeper?.restore((text) => {
+        if (!this.disposed) this.composer.restoreDraft(text);
+      });
+    }
     if (autoStart) void this.begin();
   }
-  /** Restored sessions stay dormant until an explicit user interaction. */
+  /** Sends `text` as the next prompt, connecting (or reconnecting) first when needed. */
+  private submit(text: string): void {
+    if (this.pendingPrompt || this.store.getState().busy) return;
+    this.pendingPrompt = text;
+    if (this.store.getState().error || this.lost) void this.begin();
+    else this.activate();
+    this.sendPending();
+    this.renderControls(this.store.getState());
+  }
+  /** Sends the user's last request again, as a new turn: the answer below it stays readable. */
+  private retry(): void {
+    const last = [...this.store.getState().messages]
+      .reverse()
+      .find((message) => message.role === "user" && message.text.trim());
+    if (last) this.submit(last.text);
+  }
+  /**
+   * Restored or ended sessions stay dormant until the user interacts (focus or a message); the
+   * chat itself always looks like a normal, connected one.
+   */
   activate(): void {
-    if (!this.handle && !this.store.getState().error) void this.begin();
+    if ((!this.handle || this.lost) && !this.store.getState().error) void this.begin();
   }
   /** Whether the Host can sign this agent out (the panel's menu offers it only then). */
   canSignOut(): boolean {
@@ -183,7 +176,7 @@ export class AgentPanel {
   reload(): void {
     void this.begin();
   }
-  /** Signs the agent out; the panel then waits for Connect, which asks how to sign in. */
+  /** Signs the agent out; the next message reconnects, which asks how to sign in. */
   logOut(): void {
     this.run(async () => {
       await this.host.signOut?.(this.identity.agentId);
@@ -218,13 +211,30 @@ export class AgentPanel {
     this.starting = true;
     this.render();
     try {
+      await this.restoring;
       await this.handle?.stop();
       if (generation !== this.generation) return;
       this.handle = null;
+      this.lost = false;
       // A new connection starts a new agent session; the conversation on screen stays.
       this.store.reconnect();
-      const handle = await this.host.start({ installedAgentId: this.identity.agentId }, (event) => {
+      const { sessionId: resumeSessionId, messages, savedOptions } = this.store.getState();
+      this.priorSessionId = resumeSessionId;
+      this.priorMessages = this.history ? messages.slice(-8) : [];
+      const config = {
+        installedAgentId: this.identity.agentId,
+        ...(this.history
+          ? {
+              conversationId: this.history.chatId,
+              ...(this.history.cwd ? { expectedWorkspace: this.history.cwd } : {}),
+              ...(resumeSessionId ? { resumeSessionId } : {}),
+              ...(savedOptions?.length ? { preferredOptions: savedOptions } : {}),
+            }
+          : {}),
+      };
+      const handle = await this.host.start(config, (event) => {
         if (generation === this.generation) {
+          if (event.type === "stopped") this.lost = true;
           if (event.type === "terminalAuthOutput") this.login.write(event.data);
           else this.store.enqueue(event);
         }
@@ -236,8 +246,36 @@ export class AgentPanel {
         this.store.setState((s) => ({ ...s, error: String(error) }));
     } finally {
       this.starting = false;
-      if (generation === this.generation) this.render();
+      if (generation === this.generation) {
+        this.sendPending();
+        this.render();
+      }
     }
+  }
+  private sendPending(): void {
+    const state = this.store.getState();
+    if (state.error && !this.starting) {
+      this.pendingPrompt = null;
+      return;
+    }
+    const text = this.pendingPrompt;
+    const handle = this.handle;
+    if (this.starting || !text || !handle || !state.ready || state.busy) return;
+    this.pendingPrompt = null;
+    this.store.setState((current) => ({ ...current, busy: true }));
+    this.run(async () => {
+      const previous = this.priorMessages;
+      if (previous.length && state.sessionId !== this.priorSessionId) {
+        const context = JSON.stringify(
+          previous.map(({ role, text }) => ({ role, text: text.slice(-400) })),
+        );
+        await handle.prompt(text, context);
+      } else {
+        await handle.prompt(text);
+      }
+      if (this.handle === handle) this.priorMessages = [];
+      if (this.handle === handle) this.composer.clearSent(text);
+    });
   }
   private render(): void {
     const s = this.store.getState();
@@ -249,6 +287,7 @@ export class AgentPanel {
           await this.handle?.answer(id, allow);
           this.store.answered(id);
         }),
+      retry: () => this.retry(),
     });
     this.renderSignIn(s);
     this.login.fit();
@@ -256,26 +295,14 @@ export class AgentPanel {
   }
   /** The status line, the connect button, the composer and the busy mark. */
   private renderControls(s: AgentState): void {
-    this.error.textContent =
-      s.error ||
-      (this.starting || (this.handle && !s.ready)
-        ? UI_STRINGS.agent.connecting
-        : !this.handle && !s.ready
-          ? UI_STRINGS.agent.restored
-          : "");
-    this.start.textContent = s.error ? UI_STRINGS.agent.retry : UI_STRINGS.agent.connect;
+    // No Connect step: a dormant chat reconnects by itself. Only a failure offers Retry.
+    this.error.textContent = s.error || (this.pendingPrompt ? UI_STRINGS.agent.pendingPrompt : "");
+    this.start.textContent = UI_STRINGS.agent.retry;
     this.start.disabled = this.starting;
-    this.start.hidden = this.starting || ((Boolean(this.handle) || s.ready) && !s.error);
+    this.start.hidden = this.starting || !s.error;
     this.status.hidden = !this.error.textContent;
-    // No input until there is a session to type to: signing in comes first.
-    this.form.hidden = !s.ready;
-    this.submit.disabled = !s.ready || s.busy;
-    this.cancel.disabled = !s.ready;
-    // Send turns into Stop while the agent works.
-    this.submit.hidden = s.busy;
-    this.cancel.hidden = !s.busy;
-    this.busyMark.hidden = !(s.busy || this.starting || (this.handle && !s.ready));
-    this.options.update(s.options, s.busy || !this.handle?.setOption);
+    this.busyMark.hidden = !s.busy && !this.pendingPrompt;
+    this.options.update(s.options, !s.ready || s.busy || !this.handle?.setOption);
     this.showElapsed(s);
     // Nothing said yet: a roomy composer in the middle; afterwards a compact one at the bottom.
     const started =
@@ -286,7 +313,12 @@ export class AgentPanel {
         s.elicitations.length >
         0 || s.terminalAuth !== null;
     this.element.dataset.mode = started ? "chat" : "empty";
-    this.prompt.setPlaceholder(started ? UI_STRINGS.agent.followUp : UI_STRINGS.agent.ask);
+    this.composer.update({
+      started,
+      busy: s.busy,
+      canCancel: s.ready,
+      pendingLabel: this.pendingPrompt ? UI_STRINGS.agent.pendingPrompt : "",
+    });
   }
   /** While the agent works, how long it has been at it; it ticks once a second. */
   private showElapsed(s: AgentState): void {
@@ -357,15 +389,22 @@ export class AgentPanel {
   discard(): void {
     this.keeper?.discard();
   }
+  flushTranscript(): Promise<void> | undefined {
+    if (!this.keeper) return;
+    this.store.flush();
+    return this.keeper.flush();
+  }
   destroy(): void {
-    this.keeper?.flush();
+    this.disposed = true;
+    void this.flushTranscript();
     clearInterval(this.tick);
     this.conversation.dispose();
     this.options.close();
     this.login.dispose();
     this.generation += 1;
+    this.pendingPrompt = null;
     this.unsubscribe();
-    this.prompt.destroy();
+    this.composer.destroy();
     this.store.dispose();
     void this.handle?.stop().catch(() => undefined);
     this.element.remove();

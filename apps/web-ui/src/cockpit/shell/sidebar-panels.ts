@@ -57,7 +57,7 @@ export class SidebarPanels {
     const { stores } = options;
     this.element = doc.createElement("aside");
     this.element.className =
-      "hilo-zone-2-sidebar bg-sidebar border-y border-l border-r-0 border-white/8 rounded-tl-[16px] rounded-bl-[16px] p-2.5 h-full";
+      "hilo-zone-2-sidebar relative bg-sidebar border-y border-l border-r-0 border-sidebar-divider rounded-tl-[16px] rounded-bl-[16px] p-2.5 h-full";
     this.element.setAttribute("aria-label", UI_STRINGS.shell.sidebar);
     this.element.style.minWidth = "0";
     // The project controls stay fixed at the top; everything below them scrolls inside `scroll`

@@ -1,15 +1,32 @@
 @layer components {
   .hilo-toast {
-    @apply fixed right-4 bottom-4 flex items-center gap-4 rounded-lg border border-white/12 bg-card py-3 pr-2 pl-4 text-[13px] text-text-primary shadow-lg;
+    @apply fixed right-4 bottom-4 flex flex-col items-center text-center text-text-primary;
     z-index: 15;
-    max-width: calc(100vw - 32px);
+    width: min(260px, calc(100vw - 32px));
+    padding: 20px 24px;
+    gap: 14px;
+    border: 0.5px solid color-mix(in srgb, var(--agent-card-tint) 20%, transparent);
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--color-card) 94%, transparent);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
   }
 
   .hilo-toast[hidden] {
     display: none;
   }
 
-  .hilo-toast-close {
-    @apply flex h-6 w-6 shrink-0 items-center justify-center rounded border-0 bg-transparent text-lg text-text-secondary cursor-pointer hover:bg-selected hover:text-text-primary;
+  .hilo-toast-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .hilo-toast-message {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
   }
 }

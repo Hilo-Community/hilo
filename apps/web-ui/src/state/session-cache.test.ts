@@ -57,3 +57,26 @@ it("creates explicit sessions, excludes terminals from the agent list and refuse
     modelName: "Codex",
   });
 });
+
+it("keeps a session's last activity time and drops an invalid one", () => {
+  const base = { chatId: "a", title: "A", validationState: "UnchangedBlue", kind: "terminal" };
+  expect(restoreCachedSession({ ...base, lastActiveAt: 1_700_000_000_000 }).lastActiveAt).toBe(
+    1_700_000_000_000,
+  );
+  expect(restoreCachedSession({ ...base, lastActiveAt: "yesterday" }).lastActiveAt).toBeUndefined();
+});
+
+it("keeps the creation date and workspace of saved chat threads", () => {
+  expect(
+    restoreCachedSession({
+      chatId: "copilot-chat",
+      title: "Copilot",
+      kind: "agent",
+      agentId: "github-copilot-cli",
+      modelName: "Copilot",
+      validationState: "UnchangedBlue",
+      createdAt: 42,
+      cwd: "/projects/a",
+    }),
+  ).toMatchObject({ createdAt: 42, cwd: "/projects/a" });
+});

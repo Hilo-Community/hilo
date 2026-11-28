@@ -3,9 +3,6 @@
  * means providing another object with the same shape.
  */
 export const UI_STRINGS = {
-  notifications: {
-    dismiss: "Dismiss notification",
-  },
   shell: {
     cockpit: "Hilo 4-Zone Multi-Chat Cockpit",
     activityBar: "Activity bar",
@@ -58,6 +55,7 @@ export const UI_STRINGS = {
     noRoom: "No room for another panel",
     newMenu: "New panel",
     newTerminal: "Terminal",
+    localChat: "Local chat",
     installAgent: "Install an agent…",
     externalAgents: "External Agents",
     addMoreAgents: "Add more agents",
@@ -131,6 +129,7 @@ export const UI_STRINGS = {
   sidebar: {
     navigation: "Folder, groups and sessions",
     workspaceLabel: "Workspaces",
+    justNow: "just now",
     searchWorkspaces: "Search workspaces",
     searchWorkspacesPlaceholder: "Search…",
     moreWorkspaceActions: "More workspace actions",
@@ -166,6 +165,7 @@ export const UI_STRINGS = {
     renameGroup: "Rename group",
     renameSession: "Rename session",
     closeSession: "Close session",
+    deleteChat: "Delete chat",
     closeOtherSessions: "Close other sessions",
     closeAllSessions: "Close all sessions",
     duplicateSession: "Duplicate session",
@@ -198,16 +198,21 @@ export const UI_STRINGS = {
     reject: "Reject",
     resetDefaults: "Reset to Hilo defaults",
   },
+  code: {
+    copy: "Copy",
+    copied: "Copied",
+    copyLabel: "Copy code",
+    plain: "text",
+  },
   agent: {
-    connecting: "Connecting…",
     connect: "Connect",
     retry: "Retry",
-    restored: "Connect when you are ready to use this agent.",
     prompt: "Agent prompt",
     ask: "Ask the agent…",
     followUp: "Send follow-up",
     sandbox: "Read-only sandbox",
     sandboxHint: "Network and credentials are off; file writes become proposals for review.",
+    pendingPrompt: "Reconnecting to the agent…",
     send: "Send prompt",
     cancel: "Cancel",
     plan: "Agent plan",
@@ -219,6 +224,11 @@ export const UI_STRINGS = {
     thought: "Thought",
     thoughtBriefly: "Thought briefly",
     exploring: "Exploring…",
+    working: "Working…",
+    copyResponse: "Copy response",
+    copiedResponse: "Copied",
+    retryResponse: "Retry",
+    worked: "Worked",
     explored: "Explored",
     explorePending: "Waiting to explore",
     exploreFailed: "Exploration failed",
@@ -251,7 +261,7 @@ export const UI_STRINGS = {
     optionLabel: "Change how the agent works",
     showAll: "Show all",
     showLess: "Show less",
-    restoredNote: "Previous conversation. The agent starts a new session and does not remember it.",
+    restoredNote: "Earlier conversation. The agent gets a summary of it when you continue.",
     allow: "Allow once",
     reject: "Reject",
     signInTitle: "Sign in to continue",

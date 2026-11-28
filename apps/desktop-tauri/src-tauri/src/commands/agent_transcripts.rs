@@ -2,16 +2,15 @@
 //!
 //! The Host stores the text the panel gives it and never interprets it. A conversation holds code
 //! and command output, so the directory and its files are readable by the owner only, a file is
-//! removed with its panel, and files nobody reopened for a month are deleted.
+//! removed when the chat is deleted.
 
 use crate::state::DesktopAppState;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
 const DIRECTORY: &str = "agent-transcripts";
-/// More than the panel ever keeps (about 2 MiB of text and 256 KiB of tool previews).
-const MAX_BYTES: usize = 3 * 1024 * 1024;
-const MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// The renderer caps the serialized JSON at 2.5 Mi UTF-16 code units. A UTF-16 unit
+/// may account for up to three bytes in UTF-8, so leave room for the complete transcript.
+const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 fn directory(root: &Path) -> PathBuf {
     root.join(DIRECTORY)
@@ -43,26 +42,8 @@ fn private_directory(root: &Path) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn prune(dir: &Path, now: SystemTime) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let old = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > MAX_AGE);
-        if old {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
 pub(crate) fn load(root: &Path, chat_id: &str) -> Result<Option<String>, String> {
     let path = file(root, chat_id)?;
-    prune(&directory(root), SystemTime::now());
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -93,6 +74,7 @@ pub(crate) fn save(root: &Path, chat_id: &str, payload: &str) -> Result<(), Stri
             .open(&temporary)
             .map_err(|error| format!("Failed to write the conversation: {error}"))?;
         out.write_all(payload.as_bytes())
+            .and_then(|()| out.sync_data())
             .map_err(|error| format!("Failed to write the conversation: {error}"))?;
     }
     std::fs::rename(&temporary, &target)
@@ -166,6 +148,16 @@ mod tests {
     }
 
     #[test]
+    fn stores_transcripts_larger_in_utf8_than_in_the_renderer() {
+        let root = tempfile::tempdir().unwrap();
+        let payload = serde_json::json!({"messages": ["界".repeat(1_100_000), "🌍"]}).to_string();
+        assert!(payload.len() > 3 * 1024 * 1024);
+        assert!(payload.encode_utf16().count() < 2_500_000);
+        save(root.path(), "unicode-thread", &payload).unwrap();
+        assert_eq!(load(root.path(), "unicode-thread").unwrap(), Some(payload));
+    }
+
+    #[test]
     fn refuses_text_that_is_not_json_or_is_too_large() {
         let root = tempfile::tempdir().unwrap();
         assert!(save(root.path(), "chat-1", "not json").is_err());
@@ -183,16 +175,5 @@ mod tests {
         let mode = |path: PathBuf| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(directory(root.path())), 0o700);
         assert_eq!(mode(file(root.path(), "chat-1").unwrap()), 0o600);
-    }
-
-    #[test]
-    fn conversations_nobody_reopened_for_a_month_are_deleted() {
-        let root = tempfile::tempdir().unwrap();
-        save(root.path(), "chat-1", "{}").unwrap();
-        save(root.path(), "chat-2", "{}").unwrap();
-        let later = SystemTime::now() + MAX_AGE + Duration::from_secs(60);
-        prune(&directory(root.path()), later);
-        assert_eq!(load(root.path(), "chat-1").unwrap(), None);
-        assert_eq!(load(root.path(), "chat-2").unwrap(), None);
     }
 }

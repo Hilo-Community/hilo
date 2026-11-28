@@ -15,10 +15,12 @@ type ChatActions = Pick<
   | "createChat"
   | "canCreateChat"
   | "toggleMaximizeChat"
+  | "showGroupTiled"
   | "setPanelArea"
   | "getPanelArea"
   | "renameChat"
   | "selectChat"
+  | "hideChatPanel"
   | "closeChat"
 >;
 
@@ -34,7 +36,15 @@ export function createChatActions(ctx: StoreContext): ChatActions {
       (item) => item.id === (options?.groupId ?? state.activeGroupId),
     );
     if (!group) return null;
-    const current = resolveGroupLayout(group);
+    const hidden = new Set(
+      zone3
+        .getState()
+        .chats.flatMap((chat) => (chat.kind === "agent" && chat.panelHidden ? [chat.chatId] : [])),
+    );
+    const visibleIds = group.chatIds.filter((id) => !hidden.has(id));
+    const current = hidden.size
+      ? resolveGroupLayout({ ...group, chatIds: visibleIds })
+      : resolveGroupLayout(group);
     const place = (placement: {
       target?: string;
       direction?: SplitDirection;
@@ -45,15 +55,15 @@ export function createChatActions(ctx: StoreContext): ChatActions {
         ? placePanel(current, chatId, panelArea, placement)
         : addPanel(current, chatId, { ...placement, aspect: DEFAULT_LAYOUT_ASPECT });
     const active = zone3.getState().activeChatId;
-    const anchor = group.chatIds.includes(active) ? active : group.lastActiveChatId;
+    const anchor = visibleIds.includes(active) ? active : group.lastActiveChatId;
     const inOrder =
-      options?.nextToActive && !options.from && anchor && group.chatIds.includes(anchor)
+      options?.nextToActive && !options.from && anchor && visibleIds.includes(anchor)
         ? place({ target: anchor, direction: "row", position: "after" })
         : null;
     const layout =
       inOrder ??
       place({
-        ...(options?.from ? { target: options.from } : {}),
+        ...(options?.from && visibleIds.includes(options.from) ? { target: options.from } : {}),
         ...(options?.direction ? { direction: options.direction } : {}),
         ...(options?.position ? { position: options.position } : {}),
       });
@@ -103,8 +113,19 @@ export function createChatActions(ctx: StoreContext): ChatActions {
         ),
       }));
     }
-    if (chatState.activeChatId !== chatId)
-      zone3.setState((prev) => ({ ...prev, activeChatId: chatId }));
+    if (
+      chatState.activeChatId !== chatId ||
+      (targetChat.kind === "agent" && targetChat.panelHidden)
+    )
+      zone3.setState((prev) => ({
+        ...prev,
+        activeChatId: chatId,
+        chats: prev.chats.map((chat) =>
+          chat.chatId === chatId && chat.kind === "agent" && chat.panelHidden
+            ? { ...chat, panelHidden: false }
+            : chat,
+        ),
+      }));
 
     // Looking at the chat dismisses what it only had to report (a finished turn, an error, or a
     // terminal's finished-agent mark). A running turn or a pending permission is still current.
@@ -135,6 +156,25 @@ export function createChatActions(ctx: StoreContext): ChatActions {
     return syncDurationMs;
   };
 
+  const setMaximized = (groupId: string, chatId: string | null): void => {
+    const group = navigation.getState().groups.find((item) => item.id === groupId);
+    if (!group || (group.maximizedChatId ?? null) === chatId) return;
+    navigation.setState((prev) => ({
+      ...prev,
+      groups: prev.groups.map((item) =>
+        item.id === groupId ? { ...item, maximizedChatId: chatId } : item,
+      ),
+    }));
+  };
+
+  const showChatAlone = (chatId: string): void => {
+    const group = navigation.getState().groups.find((item) => item.chatIds.includes(chatId));
+    if (!group) return;
+    setMaximized(group.id, chatId);
+    // The session shown alone is the selected one (Zone 4 follows it).
+    selectChat(chatId);
+  };
+
   return {
     setPanelArea(area: AreaSize | null): void {
       panelArea = area && area.widthPx > 0 && area.heightPx > 0 ? area : null;
@@ -147,15 +187,12 @@ export function createChatActions(ctx: StoreContext): ChatActions {
     toggleMaximizeChat(chatId: string): void {
       const group = navigation.getState().groups.find((item) => item.chatIds.includes(chatId));
       if (!group) return;
-      const alone = resolveGroupMaximized(group) === chatId;
-      navigation.setState((prev) => ({
-        ...prev,
-        groups: prev.groups.map((item) =>
-          item.id === group.id ? { ...item, maximizedChatId: alone ? null : chatId } : item,
-        ),
-      }));
-      // The session shown alone is the selected one (Zone 4 follows it).
-      if (!alone) selectChat(chatId);
+      if (resolveGroupMaximized(group) === chatId) setMaximized(group.id, null);
+      else showChatAlone(chatId);
+    },
+
+    showGroupTiled(groupId: string): void {
+      setMaximized(groupId, null);
     },
 
     canCreateChat(options?: CreateChatOptions): boolean {
@@ -163,21 +200,23 @@ export function createChatActions(ctx: StoreContext): ChatActions {
     },
 
     createChat(options?: CreateChatOptions): string | null {
-      const chatId = nextChatId();
-      const plan = planNewPanel(options, chatId);
-      if (!plan) return null;
       const z3 = zone3.getState();
       const neighbour = z3.chats.find((chat) => chat.chatId === (options?.from ?? z3.activeChatId));
       // A new session takes the model of the one next to it, but a shell has no model to share.
       const sibling = neighbour?.kind === "terminal" ? undefined : neighbour;
       const kind = options?.kind ?? "agent";
-      const agentId = options?.agentId ?? sibling?.agentId;
+      const agentId = options?.native ? undefined : (options?.agentId ?? sibling?.agentId);
+      const chatId = kind === "agent" && agentId ? crypto.randomUUID() : nextChatId();
+      const plan = planNewPanel(options, chatId);
+      if (!plan) return null;
       const agentName =
         options?.agentName ??
         sibling?.agentName ??
         options?.modelName ??
         sibling?.modelName ??
         "Codex";
+      const createdAt = Date.now();
+      const cwd = navigation.getState().projectPath;
       const chat: CockpitChatTab =
         kind === "terminal"
           ? {
@@ -201,7 +240,9 @@ export function createChatActions(ctx: StoreContext): ChatActions {
               modelName: options?.modelName ?? sibling?.modelName ?? "Codex",
               validationState: "UnchangedBlue",
               agentExecutionStatus: "Idle",
-              lastActiveAt: Date.now(),
+              createdAt,
+              ...(cwd ? { cwd } : {}),
+              lastActiveAt: createdAt,
             };
       zone3.setState((prev) => ({
         ...prev,
@@ -265,14 +306,42 @@ export function createChatActions(ctx: StoreContext): ChatActions {
 
     selectChat,
 
+    hideChatPanel(chatId: string): void {
+      const state = zone3.getState();
+      const chat = state.chats.find((item) => item.chatId === chatId);
+      if (chat?.kind !== "agent" || chat.panelHidden) return;
+      const group = navigation.getState().groups.find((item) => item.chatIds.includes(chatId));
+      const nextId =
+        state.activeChatId === chatId
+          ? state.chats.find(
+              (item) =>
+                item.chatId !== chatId &&
+                group?.chatIds.includes(item.chatId) &&
+                (item.kind === "terminal" || !item.panelHidden),
+            )?.chatId
+          : state.activeChatId;
+      zone3.setState((prev) => ({
+        ...prev,
+        activeChatId: nextId ?? "",
+        chats: prev.chats.map((item) => (item === chat ? { ...chat, panelHidden: true } : item)),
+      }));
+      if (group?.maximizedChatId === chatId) {
+        setMaximized(group.id, nextId && group.chatIds.includes(nextId) ? nextId : null);
+      }
+      if (nextId && nextId !== state.activeChatId) selectChat(nextId);
+    },
+
     closeChat(chatId: string): void {
       const z3 = zone3.getState();
       if (!z3.chats.some((c) => c.chatId === chatId)) return;
       const nextChats = z3.chats.filter((c) => c.chatId !== chatId);
       const group = navigation.getState().groups.find((group) => group.chatIds.includes(chatId));
+      const visibleChats = nextChats.filter(
+        (chat) => chat.kind === "terminal" || !chat.panelHidden,
+      );
       const nextActiveChat =
         z3.activeChatId === chatId
-          ? (nextChats.find((chat) => group?.chatIds.includes(chat.chatId)) ?? nextChats[0])
+          ? (visibleChats.find((chat) => group?.chatIds.includes(chat.chatId)) ?? visibleChats[0])
           : undefined;
 
       zone2.setState((prev) => ({
@@ -283,7 +352,8 @@ export function createChatActions(ctx: StoreContext): ChatActions {
       zone3.setState((prev) => ({
         ...prev,
         chats: nextChats,
-        activeChatId: nextActiveChat ? nextActiveChat.chatId : prev.activeChatId,
+        activeChatId:
+          prev.activeChatId === chatId ? (nextActiveChat?.chatId ?? "") : prev.activeChatId,
       }));
 
       navigation.setState((prev) => ({

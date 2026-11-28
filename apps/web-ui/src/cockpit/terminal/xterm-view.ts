@@ -4,22 +4,23 @@ import type { TerminalView } from "./terminal-pane.js";
 
 /** xterm.js behind a terminal panel's `TerminalView`; same background as the other panels. */
 export function createXtermView(): TerminalView {
-  // xterm paints its own canvas: give it the panels' colour (`--color-main` of the theme).
-  const background =
-    globalThis.document?.defaultView
-      ?.getComputedStyle(document.documentElement)
-      .getPropertyValue("--color-main")
-      .trim() || "#1e1e1e";
+  // xterm paints its own canvas and needs resolved CSS colors.
+  const document = globalThis.document;
+  const palette = document?.defaultView?.getComputedStyle(document.documentElement);
   const terminal = new Terminal({
     cursorBlink: true,
     fontFamily:
-      globalThis.document?.defaultView
-        ?.getComputedStyle(document.documentElement)
-        .getPropertyValue("--font-terminal")
-        .trim() || 'Menlo, "SF Mono", Consolas, "Liberation Mono", monospace',
+      palette?.getPropertyValue("--font-terminal").trim() ||
+      'Menlo, "SF Mono", Consolas, "Liberation Mono", monospace',
     fontSize: 12,
     scrollback: 5_000,
-    theme: { background, foreground: "#d4d4d4" },
+    theme: {
+      background: palette?.getPropertyValue("--color-main").trim() || "#141414",
+      foreground: palette?.getPropertyValue("--color-content-text").trim() || "#f5f5f5",
+      cursor: palette?.getPropertyValue("--color-text-primary").trim() || "#f5f5f5",
+      cursorAccent: palette?.getPropertyValue("--color-main").trim() || "#141414",
+      selectionBackground: palette?.getPropertyValue("--color-selected").trim() || "#323231",
+    },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "desktop-web-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@hilo/desktop-tauri", "dev"],
+      "port": 1420
+    }
+  ]
+}

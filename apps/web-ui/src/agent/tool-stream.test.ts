@@ -64,7 +64,9 @@ describe("output of a running command", () => {
     const actions = { openLocation: () => {}, answer: () => {} };
     store.enqueue(start());
     store.enqueue(call(chunk("line\n")));
-    const [card] = view.elements(document, store.getState(), button, actions);
+    // The command is a row of its turn's work group, and its own card opens while it runs.
+    const [group] = view.elements(document, store.getState(), button, actions);
+    const card = group?.querySelector(".hilo-agent-tool");
     expect(card?.getAttribute("data-open")).toBe("true");
     expect(card?.textContent).toContain("line");
     store.enqueue(call({ status: "completed", _meta: { terminal_exit: { exit_code: 0 } } }));

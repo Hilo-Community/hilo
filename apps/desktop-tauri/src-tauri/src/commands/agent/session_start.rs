@@ -36,6 +36,7 @@ pub(super) struct TaskFiles {
     task_id: String,
     worktree: PathBuf,
     context_db: PathBuf,
+    _slot_lock: Option<std::fs::File>,
 }
 
 impl Drop for TaskFiles {
@@ -137,9 +138,11 @@ pub(super) fn check_launch(program: &str, args: &[String]) -> Result<(), String>
 
 pub(super) fn resolve_launch(
     state: &DesktopAppState,
+    gate: &WorkspaceTrustGate,
     installed_agent_id: &str,
 ) -> Result<agent_registry::LaunchCommand, String> {
-    gate(state)?;
+    gate.authorize(GatedCapability::WorkspaceLocalBinary)
+        .map_err(|e| e.to_string())?;
     let launch = crate::commands::agent_registry::registry(state)?
         .launch_command(installed_agent_id)
         .map_err(|e| e.to_string())?;
@@ -185,10 +188,31 @@ pub(super) struct Provisioned {
     files: TaskFiles,
 }
 
-pub(super) fn provision(
+fn lock_worktree_slot(data_dir: &Path, slot: &str) -> Result<std::fs::File, String> {
+    let directory = data_dir.join("agent-worktree-locks");
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join(format!("{slot}.lock")))
+        .map_err(|e| e.to_string())?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|e| {
+        if e.kind() == fs2::lock_contended_error().kind() {
+            "An agent is already connected to this chat".into()
+        } else {
+            format!("Cannot lock the agent worktree: {e}")
+        }
+    })?;
+    Ok(file)
+}
+
+fn provision_at(
     state: &DesktopAppState,
     root: &Path,
     id: u32,
+    worktree_slot: Option<String>,
 ) -> Result<Provisioned, String> {
     let task_id = format!("acp-{}-{id}", now());
     let manager = CheckpointManager::open_or_shadow(root, &state.app_data_dir.join("shadow-repos"))
@@ -210,19 +234,32 @@ pub(super) fn provision(
         .iter()
         .map(|(path, text)| UnsavedBuffer { path, text })
         .collect();
+    let slot_lock = worktree_slot
+        .as_deref()
+        .map(|slot| lock_worktree_slot(&state.app_data_dir, slot))
+        .transpose()?;
+    let worktree_slot = worktree_slot.unwrap_or_else(|| task_id.clone());
+    if slot_lock.is_some() {
+        // The sandboxed process cannot outlive its owning host. Only a lock holder may clean
+        // the previous snapshot, and the lock is retained through TaskFiles::drop.
+        manager
+            .release_worktree(&worktree_slot)
+            .map_err(|e| e.to_string())?;
+    }
     let checkpoint = manager
         .create_checkpoint(&task_id, CheckpointKind::BeforeAgent, &buffers)
         .map_err(|e| e.to_string())?;
     let task = manager
-        .provision_worktree_or_copy(&task_id)
+        .provision_worktree_slot(&task_id, &worktree_slot)
         .map_err(|e| e.to_string())?;
     let context_db = state.app_data_dir.join(format!("{task_id}-context.sqlite"));
     Ok(Provisioned {
         files: TaskFiles {
             manager,
-            task_id: task_id.clone(),
+            task_id: worktree_slot,
             worktree: task.workspace.clone(),
             context_db,
+            _slot_lock: slot_lock,
         },
         task_id,
         checkpoint: checkpoint.commit,
@@ -293,6 +330,10 @@ pub(super) fn sandbox_runner(
 pub(super) fn start_session(
     app: &tauri::AppHandle,
     installed_agent_id: String,
+    conversation_id: Option<String>,
+    resume_session_id: Option<String>,
+    expected_workspace: Option<String>,
+    preferred_options: Vec<AcpOptionPreference>,
     events: Channel<AcpEvent>,
 ) -> Result<u32, String> {
     let state = app.state::<DesktopAppState>();
@@ -302,11 +343,11 @@ pub(super) fn start_session(
         .agent_account_lock
         .lock()
         .map_err(|_| "account lock poisoned")?;
-    let gate = gate(&state)?;
+    let gate = gate(&state, expected_workspace.as_deref())?;
     let (launch, registry, runtime) = {
         // The program comes from the registry by id, never from the webview, and the user already
         // confirmed it when installing; it still runs only in the read-only sandbox.
-        let mut launch = resolve_launch(&state, &installed_agent_id)?;
+        let mut launch = resolve_launch(&state, &gate, &installed_agent_id)?;
         let registry = crate::commands::agent_registry::registry(&state)?;
         let account = registry
             .account(&launch.installation_id)
@@ -337,7 +378,33 @@ pub(super) fn start_session(
         .map_err(|e| e.to_string())?;
     let id = state.next_agent_id.fetch_add(1, Ordering::SeqCst);
     let root = gate.workspace_root().to_path_buf();
-    let task = provision(&state, &root, id)?;
+    // Keep the path stable for ACP session recovery. Each launch still gets a fresh snapshot
+    // and a fresh policy task and lease. No path supplied by the webview is used.
+    let worktree_slot = conversation_id
+        .filter(|chat| {
+            !chat.is_empty()
+                && chat.len() <= 64
+                && chat
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+        .map(|chat| {
+            let mut hash = blake3::Hasher::new();
+            hash.update(root.as_os_str().as_encoded_bytes());
+            hash.update(b"\0");
+            hash.update(installation_id.as_bytes());
+            hash.update(b"\0");
+            hash.update(chat.as_bytes());
+            let prefix = if installed_agent_id == "github-copilot-cli" {
+                "copilot"
+            } else {
+                "acp-chat"
+            };
+            format!("{prefix}-{}", &hash.finalize().to_hex().as_str()[..48])
+        });
+    let resume_session_id =
+        resume_session_id.filter(|id| worktree_slot.is_some() && !id.is_empty() && id.len() < 256);
+    let task = provision_at(&state, &root, id, worktree_slot)?;
     // A program inside the workspace runs from the task snapshot, not from the live workspace.
     let program = launch.program;
     let program = program
@@ -403,7 +470,13 @@ pub(super) fn start_session(
             ..ResourceLimits::default()
         },
     };
-    let supervisor = AcpSessionSupervisor::start(host, launch).map_err(|e| e.to_string())?;
+    let supervisor = AcpSessionSupervisor::start_with_preferences(
+        host,
+        launch,
+        resume_session_id,
+        preferred_options,
+    )
+    .map_err(|e| e.to_string())?;
     if !home_dir.is_dir() {
         return Err("Agent account was signed out while starting".into());
     }
@@ -521,5 +594,40 @@ fn event_sink(
             _ => {}
         }
         let _ = events.send(event);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn a_live_worktree_cannot_be_reclaimed_but_an_abandoned_one_can() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let state = crate::state::test_state(data.path());
+        let slot = "acp-test-slot";
+        let managed = provision_at(&state, &root, 1, Some(slot.into())).unwrap();
+        assert!(provision_at(&state, &root, 2, Some(slot.into())).is_err());
+        let original_path = managed.worktree.clone();
+        let original_task = managed.task_id.clone();
+        drop(managed);
+
+        let manager = CheckpointManager::open_or_shadow(&root, &data.path().join("shadow-repos"))
+            .unwrap()
+            .with_worktrees_dir(&data.path().join("agent-worktrees"))
+            .unwrap();
+        let lock = lock_worktree_slot(data.path(), slot).unwrap();
+        manager
+            .provision_worktree_slot(&original_task, slot)
+            .unwrap();
+        assert!(original_path.exists());
+        drop(lock); // Simulate the OS releasing ownership on process exit.
+
+        let restored = provision_at(&state, &root, 3, Some(slot.into())).unwrap();
+        assert_ne!(restored.task_id, original_task);
+        assert_eq!(restored.worktree, original_path);
+        assert!(restored.worktree.exists());
     }
 }

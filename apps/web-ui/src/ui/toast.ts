@@ -1,6 +1,3 @@
-import { button } from "./dom-utils.js";
-import { UI_STRINGS } from "./ui-strings.js";
-
 /** A transient, non-modal notice, outside panels that can be hidden or clipped. */
 export class Toast {
   private readonly element: HTMLElement;
@@ -14,11 +11,14 @@ export class Toast {
     this.element.setAttribute("role", "status");
     this.element.setAttribute("aria-live", "polite");
     this.element.setAttribute("aria-atomic", "true");
-    this.message = doc.createElement("span");
-    const close = button(doc, "hilo-toast-close", UI_STRINGS.notifications.dismiss);
-    close.textContent = "×";
-    close.addEventListener("click", () => this.hide());
-    this.element.append(this.message, close);
+    const icon = doc.createElement("span");
+    icon.className = "hilo-toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52" fill="none"><path d="M22.5 6.5a4 4 0 0 1 7 0l20 35A4 4 0 0 1 46 47H6a4 4 0 0 1-3.5-5.5l20-35Z" fill="#FFD15C" stroke="#D6A537" stroke-width="1"/><path d="M26 18v13" stroke="#513C14" stroke-width="4" stroke-linecap="round"/><circle cx="26" cy="38" r="2.3" fill="#513C14"/></svg>';
+    this.message = doc.createElement("p");
+    this.message.className = "hilo-toast-message";
+    this.element.append(icon, this.message);
     doc.body.append(this.element);
   }
 

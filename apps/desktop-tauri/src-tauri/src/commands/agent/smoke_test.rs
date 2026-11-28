@@ -147,7 +147,7 @@ fn installed_gateway_transport_smoke() {
                     .prompt("Reply with the single word READY. Do not use tools.".into())
                     .unwrap();
             }
-            AcpEvent::Stopped { reason } => {
+            AcpEvent::Stopped { reason, .. } => {
                 eprintln!("{agent_id}: {reason}");
                 let traffic = metrics.snapshot();
                 eprintln!("{agent_id}: gateway evidence: {traffic:?}");

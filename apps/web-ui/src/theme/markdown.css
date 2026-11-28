@@ -1,0 +1,241 @@
+/*
+ * The Markdown of a message (`.hilo-markdown`, rendered by `ui/markdown.ts`). Tailwind Typography
+ * (`prose`) gives the base rhythm; its colours are mapped to the app's palette so both appearances
+ * follow, and the details below give the rounded look: code cards with a header, pill inline code,
+ * rounded tables and quotes. Selectors carry `.hilo-markdown` so they win over the older generic
+ * `article` rules of `agent.css`.
+ */
+.hilo-markdown {
+  --md-radius: 10px;
+  --md-border: var(--color-overlay-medium);
+  --md-surface: var(--color-overlay-subtle);
+  --md-link: #8fb8f0;
+  --md-link-soft: rgba(143, 184, 240, 0.14);
+  --tw-prose-body: var(--agent-reading-color, var(--color-text-primary));
+  --tw-prose-headings: var(--color-text-primary);
+  --tw-prose-bold: var(--color-text-primary);
+  --tw-prose-links: var(--md-link);
+  --tw-prose-counters: var(--color-text-muted);
+  --tw-prose-bullets: var(--color-text-muted);
+  --tw-prose-hr: var(--md-border);
+  --tw-prose-quotes: var(--color-text-secondary, var(--color-text-muted));
+  --tw-prose-quote-borders: var(--md-border);
+  --tw-prose-code: var(--color-text-primary);
+  --tw-prose-th-borders: var(--md-border);
+  --tw-prose-td-borders: var(--md-border);
+  font-size: inherit;
+  line-height: inherit;
+}
+:root[data-theme="light"] .hilo-markdown {
+  --md-link: #1765ad;
+  --md-link-soft: rgba(23, 101, 173, 0.1);
+}
+
+/* Paragraphs, lists and headings: compact, the chat is not an article page. */
+.hilo-markdown > :first-child {
+  margin-top: 0;
+}
+.hilo-markdown > :last-child {
+  margin-bottom: 0;
+}
+.hilo-agent-output article.hilo-markdown p,
+.hilo-markdown p {
+  margin: 0 0 10px;
+}
+.hilo-agent-output article.hilo-markdown :is(ul, ol),
+.hilo-markdown :is(ul, ol) {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.hilo-agent-output article.hilo-markdown li,
+.hilo-markdown li {
+  margin: 5px 0;
+  padding-left: 2px;
+}
+.hilo-agent-output article.hilo-markdown li :is(ul, ol) {
+  margin: 4px 0 0;
+}
+.hilo-agent-output article.hilo-markdown li > p {
+  margin: 0;
+}
+.hilo-agent-output article.hilo-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 18px 0 8px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Inline code: a soft pill, no backticks around it (Typography adds them). */
+.hilo-markdown :not(pre) > code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--md-surface);
+  box-shadow: inset 0 0 0 1px var(--md-border);
+  font-family: var(--font-terminal);
+  font-size: 0.86em;
+  font-weight: 500;
+}
+.hilo-markdown code::before,
+.hilo-markdown code::after {
+  content: none;
+}
+
+/* A reference to a project file: a light, rounded chip in the flow of the sentence. */
+.hilo-agent-output .hilo-markdown .hilo-agent-ref {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--md-link-soft);
+  color: var(--md-link);
+  text-decoration: none;
+  font-family: var(--font-terminal);
+  font-size: 0.88em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.hilo-agent-output .hilo-markdown .hilo-agent-ref:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hilo-agent-output .hilo-markdown .hilo-agent-ref code {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+  font-size: 1em;
+}
+.hilo-agent-output .hilo-markdown .hilo-agent-link {
+  color: var(--md-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--md-link) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* Code: a rounded card with the language and a Copy button in its header. */
+.hilo-markdown .hilo-code {
+  margin: 4px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  background: var(--md-surface);
+}
+.hilo-markdown .hilo-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--md-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 20px;
+}
+.hilo-markdown .hilo-code-lang {
+  font-family: var(--font-terminal);
+  text-transform: lowercase;
+}
+.hilo-agent-panel .hilo-markdown .hilo-code-copy,
+.hilo-markdown .hilo-code-copy {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.hilo-markdown .hilo-code-copy:hover,
+.hilo-markdown .hilo-code-copy:focus-visible {
+  background: var(--color-overlay-medium);
+  color: var(--color-text-primary);
+}
+.hilo-markdown .hilo-code-copy[data-copied] {
+  color: var(--agent-done, #4ade80);
+}
+.hilo-agent-output article.hilo-markdown .hilo-code pre,
+.hilo-markdown .hilo-code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-terminal);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.hilo-markdown .hilo-code pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-size: inherit;
+  font-weight: 400;
+}
+/* Shiki's colours for each appearance (see `ui/code-blocks.ts`). */
+.hilo-markdown .hilo-code code span {
+  color: var(--shiki-dark, inherit);
+}
+:root[data-theme="light"] .hilo-markdown .hilo-code code span {
+  color: var(--shiki-light, inherit);
+}
+
+/* Tables: rounded, a tinted header, rows separated by hairlines. */
+.hilo-agent-output article.hilo-markdown table,
+.hilo-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 4px 0 12px;
+  overflow-x: auto;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.94em;
+}
+.hilo-agent-output article.hilo-markdown :is(th, td),
+.hilo-markdown :is(th, td) {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--md-border);
+  vertical-align: top;
+}
+.hilo-agent-output article.hilo-markdown :is(th, td) + :is(th, td) {
+  border-left: 1px solid var(--md-border);
+}
+.hilo-agent-output article.hilo-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+.hilo-agent-output article.hilo-markdown th {
+  background: var(--md-surface);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* Quotes: a rounded card with an accent edge. */
+.hilo-agent-output article.hilo-markdown blockquote,
+.hilo-markdown blockquote {
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 3px solid var(--md-link);
+  border-radius: 0 var(--md-radius) var(--md-radius) 0;
+  background: var(--md-surface);
+  color: var(--tw-prose-quotes);
+  font-style: normal;
+  quotes: none;
+}
+.hilo-markdown blockquote p::before,
+.hilo-markdown blockquote p::after {
+  content: none;
+}
+
+.hilo-agent-output article.hilo-markdown hr {
+  margin: 16px 0;
+  border: 0;
+  border-top: 1px solid var(--md-border);
+}

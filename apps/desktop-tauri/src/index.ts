@@ -17,6 +17,7 @@ import {
   type InspectorTab,
   type NativeMigrationReport,
   OnboardingModalController,
+  type SavedChatMessages,
   type WorkspaceNavigationState,
   createCockpitStoreBundle,
   createInitialCockpitShellState,
@@ -24,11 +25,14 @@ import {
   restoreCachedSession,
 } from "@hilo/web-ui";
 
+import { collectNativeThreadMessages } from "./native-thread-history.js";
+
 export const WORKSPACE_SESSION_CACHE_FILENAME = "workspace_session_cache.bin";
 
 export interface WorkspaceSessionCacheSnapshot {
   readonly navigation?: WorkspaceNavigationState;
   readonly chats?: readonly CockpitChatTab[];
+  readonly chatMessages?: SavedChatMessages;
   readonly schemaVersion: number;
   readonly workspaceRoot: string;
   readonly activePersona: CockpitPersonaMode;
@@ -86,6 +90,7 @@ export interface LazyBootDesktopOptions {
   readonly terminalHost?: CockpitDomControllerOptions["terminalHost"];
   readonly debugHost?: CockpitDomControllerOptions["debugHost"];
   readonly agentHost?: CockpitDomControllerOptions["agentHost"];
+  readonly nativeChat?: CockpitDomControllerOptions["nativeChat"];
   readonly judgeHost?: CockpitDomControllerOptions["judgeHost"];
   readonly agentRegistryHost?: CockpitDomControllerOptions["agentRegistryHost"];
   readonly openSettingsWindow?: CockpitDomControllerOptions["openSettingsWindow"];
@@ -108,7 +113,7 @@ export interface LazyBootDesktopHandle<TChannel extends BinaryIpcChannel = Binar
   getBackgroundServicesState(): BackgroundServicesState;
   waitForBackgroundServices(): Promise<BackgroundServicesState>;
   setWorkspaceRoot(workspaceRoot: string): void;
-  exportSessionCacheBinary(): Uint8Array;
+  exportSessionCacheBinary(includeChatMessages?: boolean): Uint8Array;
   destroy(): void;
 }
 
@@ -156,6 +161,7 @@ export function lazyBootDesktopCockpit(
     initialActiveChatId: restoredSessionCache.activeChatId,
     initialActiveDocumentId: restoredSessionCache.activeDocumentId,
     initialChats: options?.initialChats ?? restoredSessionCache.chats,
+    initialChatMessages: restoredSessionCache.chatMessages,
     initialFileTree: options?.initialFileTree,
     initialUiZoomPercent: restoredSessionCache.uiZoomPercent,
   });
@@ -210,6 +216,7 @@ export function lazyBootDesktopCockpit(
       ...(options?.workspaceTrust ? { workspaceTrust: options.workspaceTrust } : {}),
       ...(options?.terminalHost ? { terminalHost: options.terminalHost } : {}),
       ...(options?.agentHost ? { agentHost: options.agentHost } : {}),
+      ...(options?.nativeChat ? { nativeChat: options.nativeChat } : {}),
       ...(options?.judgeHost ? { judgeHost: options.judgeHost } : {}),
       ...(options?.agentRegistryHost ? { agentRegistryHost: options.agentRegistryHost } : {}),
       ...(options?.openSettingsWindow ? { openSettingsWindow: options.openSettingsWindow } : {}),
@@ -256,7 +263,7 @@ export function lazyBootDesktopCockpit(
       workspaceRoot = nextWorkspaceRoot;
       stores.setProjectPath(nextWorkspaceRoot);
     },
-    exportSessionCacheBinary(): Uint8Array {
+    exportSessionCacheBinary(includeChatMessages = true): Uint8Array {
       const z1 = stores.zone1.getState();
       const z2 = stores.zone2.getState();
       const z3 = stores.zone3.getState();
@@ -264,6 +271,7 @@ export function lazyBootDesktopCockpit(
       return encodeWorkspaceSessionCacheBinary({
         navigation: stores.navigation.getState(),
         chats: z3.chats,
+        ...(includeChatMessages ? { chatMessages: collectNativeThreadMessages(z3) } : {}),
         schemaVersion: CONTRACT_SCHEMA_VERSION,
         workspaceRoot,
         activePersona: z1.activePersona,

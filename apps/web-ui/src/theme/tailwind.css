@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
+@import "./palette.css";
 @import "./sidebar.css";
 @import "./inspector.css";
 @import "./selection.css";
@@ -14,25 +15,12 @@
 @import "./onboarding.css";
 @import "./editor.css";
 @import "./agent.css";
+@import "./markdown.css";
 @import "./judge.css";
 @import "./settings.css";
 @import "./agent-account.css";
+@plugin "@tailwindcss/typography";
 @source "../**/*.ts";
-
-@theme {
-  --font-terminal: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
-  --color-exterior: #000000;
-  --color-main: #1e1e1e;
-  --color-sidebar: #212121;
-  --color-nav-rail: #262626;
-  --color-topbar: #262626;
-  --color-selected: #303030;
-  --color-card: #313131;
-  --color-composer: #323232;
-  --color-text-primary: #ececec;
-  --color-text-secondary: #b4b4b4;
-  --color-text-muted: #8e8e8e;
-}
 
 @layer base {
   * {
@@ -46,39 +34,4 @@
     @apply bg-topbar text-text-primary h-screen overflow-hidden flex flex-col antialiased;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, sans-serif;
   }
-}
-
-/* Tool surfaces and semantic accents are defined here for both appearances. */
-:root {
-  --agent-card-tint: white;
-  --agent-card-shade: black;
-  --agent-done: #7bc49a;
-  --agent-failed: #e39a9e;
-  --agent-waiting: #d4b06e;
-  --agent-focus: #93c5fd;
-  --agent-diff-add-fill: #20362a;
-  --agent-diff-remove-fill: #3b1b25;
-  --agent-code-comment: #999b9b;
-  --agent-code-keyword: #7cd3d3;
-  --agent-code-string: #dfa3df;
-  --agent-code-number: #e5c279;
-  --agent-code-function: #e9ad79;
-  --agent-code-meta: #afcf72;
-}
-:root[data-theme="light"],
-[data-theme="light"] {
-  --agent-card-tint: black;
-  --agent-card-shade: white;
-  --agent-done: #287a49;
-  --agent-failed: #af3c47;
-  --agent-waiting: #86621f;
-  --agent-focus: #2868b2;
-  --agent-diff-add-fill: #e6f1e9;
-  --agent-diff-remove-fill: #f8e7eb;
-  --agent-code-comment: #727373;
-  --agent-code-keyword: #176e75;
-  --agent-code-string: #8d3c89;
-  --agent-code-number: #946218;
-  --agent-code-function: #8d481b;
-  --agent-code-meta: #55721c;
 }

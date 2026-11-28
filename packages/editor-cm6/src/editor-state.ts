@@ -25,14 +25,13 @@ import {
   setHiloDecorationsEffect,
 } from "./decorations.js";
 import { hiloDiagnostics } from "./diagnostics.js";
+import { type DeclarativeVsixTheme, createThemeCompartmentExtension } from "./editor-theme.js";
 import type { LanguageFeatureClient } from "./language-features.js";
 import { createLezerHighlightingExtensions } from "./languages.js";
 import {
   type Cm6TranslatedKeybinding,
-  type DeclarativeVsixTheme,
   type KeymapPresetId,
   createKeymapCompartmentExtension,
-  createThemeCompartmentExtension,
 } from "./onboarding-vsix.js";
 import { scopeGuides } from "./scope-guides.js";
 import { highlightSelectedLineGutter, textOnlySelection } from "./selection.js";

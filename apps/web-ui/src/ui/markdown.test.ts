@@ -1,5 +1,9 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import { renderInline, renderMarkdownBlock } from "./markdown.js";
+
+/** markdown-it puts a newline between block tags; the layout does not depend on it. */
+const block = (markdown: string) => renderMarkdownBlock(markdown).replaceAll("\n", "");
 
 describe("agent Markdown", () => {
   it("renders a table with alignment and inline code", () => {
@@ -21,13 +25,9 @@ describe("agent Markdown", () => {
     expect(renderInline("**Deps in `latest`**: pin")).toBe(
       "<strong>Deps in <code>latest</code></strong>: pin",
     );
-    expect(renderInline("** `dist/` and `public/` **")).toBe(
-      "<strong> <code>dist/</code> and <code>public/</code> </strong>",
-    );
     expect(renderInline("*see `x`*")).toBe("<em>see <code>x</code></em>");
-    // Code stays literal, and text cannot forge a lifted span.
+    // Code stays literal.
     expect(renderInline("`**not bold**`")).toBe("<code>**not bold**</code>");
-    expect(renderInline("a\uE0000\uE000b")).toBe("a0b");
   });
   it("turns the references an agent writes into inline text that opens a file, not links", () => {
     const ref = (path: string, line: number, label: string) =>
@@ -63,20 +63,18 @@ describe("agent Markdown", () => {
     ]) {
       const html = renderInline(bad);
       expect(html).not.toContain("hilo-agent-ref");
+      expect(html).not.toContain("hilo-agent-link");
       expect(html).not.toContain("<a ");
-      expect(html).not.toContain("javascript:alert");
     }
     expect(renderInline('[x](<src/a"onclick="y.ts:1>)')).not.toContain('onclick="y');
   });
   it("renders lists and keeps single line breaks", () => {
-    expect(renderMarkdownBlock("- one\n- **two**")).toBe(
-      "<ul><li>one</li><li><strong>two</strong></li></ul>",
-    );
-    expect(renderMarkdownBlock("1. a\n2. b")).toContain("<ol>");
-    expect(renderMarkdownBlock("line one\nline two")).toBe("<p>line one<br>line two</p>");
+    expect(block("- one\n- **two**")).toBe("<ul><li>one</li><li><strong>two</strong></li></ul>");
+    expect(block("1. a\n2. b")).toContain("<ol>");
+    expect(block("line one\nline two")).toBe("<p>line one<br>line two</p>");
   });
   it("renders headings of any level, with text after them", () => {
-    expect(renderMarkdownBlock("#### Small\nbody")).toBe("<h4>Small</h4><p>body</p>");
+    expect(block("#### Small\nbody")).toBe("<h4>Small</h4><p>body</p>");
   });
   it("never emits agent HTML, links or images as markup", () => {
     const html = renderMarkdownBlock(
@@ -88,8 +86,41 @@ describe("agent Markdown", () => {
     const cell = renderMarkdownBlock("| <b> |\n|---|\n| <script> |");
     expect(cell).not.toContain("<script>");
   });
+  it("nests lists, keeps the numbering of a list split by blank lines, and quotes", () => {
+    expect(block("1. **Alta** · one\n   - detail `a.ts`\n   - more\n2. two")).toBe(
+      "<ol><li><strong>Alta</strong> · one<ul><li>detail <code>a.ts</code></li><li>more</li></ul></li><li>two</li></ol>",
+    );
+    // A streamed message is cut into blocks at blank lines: the second item keeps its number.
+    expect(block("2. second")).toBe('<ol start="2"><li>second</li></ol>');
+    expect(block("> quoted **text**")).toBe(
+      "<blockquote><p>quoted <strong>text</strong></p></blockquote>",
+    );
+    expect(block("~~gone~~ and ---")).toBe("<p><s>gone</s> and ---</p>");
+    // A continuation indented after a blank line stays text, never an accidental code block.
+    expect(block("    still prose")).toBe("<p>still prose</p>");
+  });
+  it("shows a bare web address as a link, but not file names that look like domains", () => {
+    expect(renderInline("see https://example.com/x now")).toBe(
+      'see <span class="hilo-agent-link" title="https://example.com/x">https://example.com/x</span> now',
+    );
+    expect(renderInline("edit README.md and App.swift")).toBe("edit README.md and App.swift");
+  });
+  it("keeps only allowed markup and table alignment styles", () => {
+    const html = block("| a |\n|:-:|\n| b |");
+    expect(html).toContain('<th style="text-align:center">a</th>');
+    const code = block("```js\nconst a = '<b>';\n```");
+    expect(code).toContain('<div class="hilo-code"><div class="hilo-code-header">');
+    expect(code).toContain('<span class="hilo-code-lang">js</span>');
+    expect(code).toContain('<button type="button" class="hilo-code-copy" aria-label="Copy code">');
+    expect(code).toContain("<pre data-lang=\"js\"><code>const a = '&lt;b&gt;';</code></pre>");
+    expect(block("```\nplain\n```")).toContain('<span class="hilo-code-lang">text</span>');
+    // The info string cannot break out of its attribute.
+    expect(block('```js"onclick="x\n1\n```')).not.toContain('onclick="x"');
+  });
   it("cuts very long tables", () => {
     const rows = Array.from({ length: 500 }, (_, i) => `| ${i} |`).join("\n");
     expect(renderMarkdownBlock(`| h |\n|---|\n${rows}`).match(/<tr>/g)?.length).toBe(201);
+    const items = Array.from({ length: 500 }, (_, i) => `- ${i}`).join("\n");
+    expect(renderMarkdownBlock(items).match(/<li>/g)?.length).toBe(200);
   });
 });

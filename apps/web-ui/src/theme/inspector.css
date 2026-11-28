@@ -44,7 +44,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: #858585;
+    color: var(--color-control-muted);
     cursor: pointer;
     transition: color 120ms ease, background 120ms ease;
   }
@@ -54,7 +54,7 @@
   .hilo-zone-4-tree-edge:hover,
   .hilo-zone-4-tree-edge:focus-visible {
     color: var(--color-text-primary);
-    background: var(--color-selected);
+    background: var(--color-button);
     outline: none;
   }
   .hilo-zone-4-body[data-tree-hidden="true"] .hilo-zone-4-tree-column {
@@ -90,7 +90,7 @@
     min-width: 0;
     min-height: 0;
     padding: 8px 0 8px 4px; /* no right padding: the scrollbar sits against the panel edge */
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 1px solid var(--color-divider);
   }
   /* Filter and the button that hides the tree */
   .hilo-file-tree-header {
@@ -116,7 +116,7 @@
     border: 0;
     border-radius: 6px;
     background: transparent;
-    color: #858585; /* same as the panel toggles of the header */
+    color: var(--color-control-muted); /* same as the panel toggles of the header */
     cursor: pointer;
   }
   /* Same size as the header's panel icons */
@@ -125,8 +125,32 @@
     width: 16px;
     height: 16px;
   }
-  .hilo-file-tree-action:hover {
-    background: var(--color-selected);
+  .hilo-file-tree-action svg {
+    transform: rotate(180deg);
+  }
+  .hilo-zone-4-body[data-tree-hidden="true"] .hilo-file-tree-action svg {
+    transform: rotate(0deg);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .hilo-file-tree-action svg {
+      transition: transform 140ms ease;
+    }
+    /* The edge takes over when the tree's own button slides out of view. */
+    .hilo-zone-4-tree-edge:not([hidden]) svg {
+      animation: hilo-tree-arrow-reveal 140ms ease both;
+    }
+  }
+  @keyframes hilo-tree-arrow-reveal {
+    from {
+      transform: rotate(180deg);
+    }
+    to {
+      transform: rotate(0deg);
+    }
+  }
+  .hilo-file-tree-action:hover:not(:disabled),
+  .hilo-file-tree-action:focus-visible {
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .hilo-file-tree-filter {
@@ -202,18 +226,18 @@
     padding-right: 8px;
     border-radius: 2px;
     background: transparent;
-    color: #f0f4f8;
+    color: var(--color-text-primary);
     font-size: 13px;
     font-weight: 400;
     cursor: pointer;
     transition: background-color 75ms, color 75ms;
   }
   .explorer-row:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
+    background: var(--color-overlay-subtle);
+    color: var(--color-text-primary);
   }
   .explorer-row[aria-selected="true"] {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--color-overlay-soft);
   }
   .explorer-guide {
     position: absolute;
@@ -294,6 +318,36 @@
   .filetree-color-muted {
     color: #8a8a8a;
   }
+  [data-theme="light"] .filetree-folder-color {
+    color: #6e7681;
+  }
+  [data-theme="light"] .filetree-color-cyan {
+    color: #0a95b0;
+  }
+  [data-theme="light"] .filetree-color-blue {
+    color: #2f6fe4;
+  }
+  [data-theme="light"] .filetree-color-yellow {
+    color: #a07f14;
+  }
+  [data-theme="light"] .filetree-color-green {
+    color: #2f9153;
+  }
+  [data-theme="light"] .filetree-color-orange {
+    color: #c1623a;
+  }
+  [data-theme="light"] .filetree-color-pink {
+    color: #b84f86;
+  }
+  [data-theme="light"] .filetree-color-purple {
+    color: #7c5bc4;
+  }
+  [data-theme="light"] .filetree-color-image {
+    color: #1f8f72;
+  }
+  [data-theme="light"] .filetree-color-muted {
+    color: #6b6b66;
+  }
   /* JavaScript debugger, in the sidebar's Debug section */
   .hilo-debug-panel {
     display: flex;
@@ -319,10 +373,14 @@
     padding: 0 8px;
     border: 0;
     border-radius: 5px;
-    background: var(--color-selected);
+    background: transparent;
     color: var(--color-text-primary);
     font-size: 11px;
     cursor: pointer;
+  }
+  .hilo-debug-toolbar button:hover:not(:disabled),
+  .hilo-debug-toolbar button:focus-visible {
+    background: var(--color-button);
   }
   .hilo-debug-toolbar button:disabled {
     opacity: 0.45;

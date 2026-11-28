@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { CONTRACT_SCHEMA_VERSION } from "@hilo/protocol-types";
 import { resolveGroupLayout, resolveGroupMaximized } from "@hilo/web-ui";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   bootstrapDesktopShell,
   decodeWorkspaceSessionCacheBinary,
   encodeWorkspaceSessionCacheBinary,
   lazyBootDesktopCockpit,
 } from "./index.js";
+import { NativeThreadHistory } from "./native-thread-history.js";
 
 describe("@hilo/desktop-tauri — LOT-005 Lazy Boot & Inspector Sync", () => {
   it("restores work groups and their selected header tab from the session cache", () => {
@@ -21,6 +22,72 @@ describe("@hilo/desktop-tauri — LOT-005 Lazy Boot & Inspector Sync", () => {
     restored.stores.createWorkGroup("Sidebar");
     expect(restored.stores.navigation.getState().activeGroupId).not.toBe(previousId);
     restored.destroy();
+  });
+
+  it("restores native chat text without trusting cached markup or streaming state", () => {
+    const first = lazyBootDesktopCockpit();
+    const chatId = first.stores.zone3.getState().activeChatId;
+    first.stores.zone3.setState((state) => ({
+      ...state,
+      messagesByChatId: {
+        [chatId]: [
+          {
+            chatId,
+            messageId: "m1",
+            role: "assistant",
+            content: "**Hello**",
+            renderedHtmlBlocks: ["<img src=x onerror=alert(1)>"],
+            streaming: true,
+          },
+        ],
+      },
+    }));
+    const bytes = first.exportSessionCacheBinary();
+    first.destroy();
+    const restored = lazyBootDesktopCockpit({ cachedSessionBytes: bytes });
+    const messages = restored.stores.zone3.getState().messagesByChatId[chatId];
+    expect(messages?.[0]).toMatchObject({ content: "**Hello**", streaming: false });
+    expect(messages?.[0]?.renderedHtmlBlocks.join("")).toContain("<strong>Hello</strong>");
+    expect(messages?.[0]?.renderedHtmlBlocks.join("")).not.toContain("onerror");
+    restored.destroy();
+  });
+
+  it("migrates native history to per-thread files and removes it with the thread", async () => {
+    const first = lazyBootDesktopCockpit();
+    const id = first.stores.zone3.getState().activeChatId;
+    const messages = [{ messageId: "m1", role: "assistant" as const, content: "saved text" }];
+    const files = new Map<string, string>();
+    const history = new NativeThreadHistory({
+      load: async (id) => files.get(id) ?? null,
+      save: vi.fn(async (id, json) => {
+        files.set(id, json);
+      }),
+      remove: async (id) => {
+        files.delete(id);
+      },
+    });
+    const state = first.stores.zone3.getState();
+    expect(await history.load(state.chats, { [id]: messages })).toEqual({ [id]: messages });
+    const migrated = {
+      ...state,
+      messagesByChatId: {
+        [id]: messages.map((message) => ({
+          ...message,
+          chatId: id,
+          streaming: false,
+          renderedHtmlBlocks: [],
+        })),
+      },
+    };
+    await history.save(migrated);
+    expect(files.has(id)).toBe(true);
+    expect(await history.load(state.chats)).toEqual({ [id]: messages });
+    expect(
+      decodeWorkspaceSessionCacheBinary(first.exportSessionCacheBinary(false)).chatMessages,
+    ).toBeUndefined();
+    await history.save({ ...migrated, chats: [] });
+    expect(files.has(id)).toBe(false);
+    first.destroy();
   });
 
   it("restores a tab's panel layout with its sizes after a restart", () => {

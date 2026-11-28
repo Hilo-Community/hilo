@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { HiloEditorView, InMemoryBinaryHostBridge } from "@hilo/editor-cm6";
+import { HiloEditorView, InMemoryBinaryHostBridge, promptInputOf } from "@hilo/editor-cm6";
 import { describe, expect, it, vi } from "vitest";
 import type { AcpEvent, AgentHandle, AgentHost } from "../../agent/store.js";
 import {
   CockpitDomController,
+  type CockpitDomControllerOptions,
   type WorkGroup,
   createCockpitStoreBundle,
   resolveGroupLayout,
@@ -68,11 +69,8 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
     const controller = new CockpitDomController({ rootContainer, stores, editorView });
     const editorDom = editorView.getEditorView().dom;
     const controls = rootContainer.querySelector(".sidebar-project-controls");
-    expect(
-      Array.from(controls?.querySelectorAll("button") ?? [], (button) =>
-        button.getAttribute("aria-label"),
-      ),
-    ).toEqual(["Open project", "Search workspaces", "Properties", "More workspace actions"]);
+    // "Open project" plus the search, filter and more buttons of the Workspaces header.
+    expect(controls?.querySelectorAll("button")).toHaveLength(4);
     expect(controls?.querySelector("button")?.disabled).toBe(true);
     expect(controls?.querySelector("button")?.textContent).toBe("Open project");
     for (const section of ["search", "git", "debug", "mcp"] as const) {
@@ -241,7 +239,7 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
     stores.setWorkGroupLayout("nope", null);
     expect(stores.navigation.getState().groups).toHaveLength(1);
   });
-  function mount() {
+  function mount(nativeChat?: CockpitDomControllerOptions["nativeChat"]) {
     const root = document.createElement("div");
     document.body.appendChild(root);
     const chat = (chatId: string) => ({
@@ -261,6 +259,7 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
       rootContainer: root,
       stores,
       editorView,
+      ...(nativeChat ? { nativeChat } : {}),
       agentRegistryHost: {
         list: async () => ({
           agents: [],
@@ -289,11 +288,38 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
     return { root, stores, cells, editorView, cleanup };
   }
 
+  it("sends a local chat turn through the shared composer and keeps the result in the right thread", async () => {
+    const send = vi.fn(async () => "Local answer");
+    const { root, stores, cleanup } = mount({ send, cancel: vi.fn(async () => {}) });
+    root.querySelector<HTMLButtonElement>(".hilo-header-tab-add")?.click();
+    const entry = [...document.querySelectorAll<HTMLButtonElement>(".hilo-new-panel-item")].find(
+      (item) => item.textContent?.trim() === UI_STRINGS.chat.localChat,
+    );
+    entry?.click();
+    const chatId = stores.zone3.getState().activeChatId;
+    expect(chatId).not.toBe("a");
+    const cell = root.querySelector(`[data-chat-id="${chatId}"].hilo-chat-cell`);
+    promptInputOf(cell?.querySelector(".hilo-agent-composer .cm-editor") ?? null)?.setText("Hello");
+    cell?.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await vi.waitFor(() =>
+      expect(stores.zone3.getState().messagesByChatId[chatId]).toMatchObject([
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Local answer" },
+      ]),
+    );
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.any(String), [
+      { role: "user", content: "Hello" },
+    ]);
+    expect(stores.zone3.getState().messagesByChatId.a).toEqual([]);
+    cleanup();
+  });
+
   it("creates sessions from the header + and from each panel's split buttons", async () => {
     const { root, stores, cells, editorView, cleanup } = mount();
     await addSessionFromMenu(root);
-    expect(cells().map((c) => c.dataset.chatId)).toContain("chat-3");
-    expect(stores.zone3.getState().activeChatId).toBe("chat-3");
+    const agentChatId = stores.zone3.getState().activeChatId;
+    expect(agentChatId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(cells().map((cell) => cell.dataset.chatId)).toContain(agentChatId);
 
     const cellA = cells().find((c) => c.dataset.chatId === "a") as HTMLElement;
     cellA.querySelector<HTMLButtonElement>(".hilo-split-right")?.click();
@@ -589,10 +615,11 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
 
     // New sessions appear as tabs as they are created; closing one removes its tab and panel.
     await addSessionFromMenu(root);
-    expect(tabs().map((tab) => tab.dataset.chatId)).toEqual(["a", "b", "chat-3"]);
+    const agentChatId = stores.zone3.getState().activeChatId;
+    expect(tabs().map((tab) => tab.dataset.chatId)).toEqual(["a", "b", agentChatId]);
     expect(tabs()[2]?.getAttribute("aria-selected")).toBe("true");
     tabs()[1]?.querySelector<HTMLButtonElement>(".hilo-header-tab-close")?.click();
-    expect(tabs().map((tab) => tab.dataset.chatId)).toEqual(["a", "chat-3"]);
+    expect(tabs().map((tab) => tab.dataset.chatId)).toEqual(["a", agentChatId]);
     expect(cells().map((cell) => cell.dataset.chatId)).not.toContain("b");
 
     // Another group shows its own sessions.

@@ -28,8 +28,10 @@
   cursor: pointer;
 }
 .hilo-judge-banner button:hover:not(:disabled),
-.hilo-judge-review button:hover:not(:disabled) {
-  background: var(--color-selected, #2a2d2e);
+.hilo-judge-review button:hover:not(:disabled),
+.hilo-judge-banner button:focus-visible,
+.hilo-judge-review button:focus-visible {
+  background: var(--color-button);
 }
 .hilo-judge-review button:disabled {
   opacity: 0.5;
@@ -70,31 +72,11 @@
   border: 1px solid;
   font-weight: 600;
 }
-/* Same palette as the editor's validation ranges (HILO_STATE_VISUAL_TOKENS). */
-.hilo-judge-badge[data-state="ValidatedGreen"] {
-  background: #052e16;
-  border-color: #22c55e;
-  color: #86efac;
-}
-.hilo-judge-badge[data-state="ReviewYellow"] {
-  background: #422006;
-  border-color: #eab308;
-  color: #fde047;
-}
-.hilo-judge-badge[data-state="FailedRed"] {
-  background: #450a0a;
-  border-color: #ef4444;
-  color: #fca5a5;
-}
-.hilo-judge-badge[data-state="StaleOrange"] {
-  background: #431407;
-  border-color: #f97316;
-  color: #fdba74;
-}
-.hilo-judge-badge[data-state="UnchangedBlue"] {
-  background: #0f172a;
-  border-color: #3b82f6;
-  color: #93c5fd;
+.hilo-judge-badge,
+.hilo-judge-conflict {
+  background: var(--judge-state-bg);
+  border-color: var(--judge-state-border);
+  color: var(--judge-state-text);
 }
 .hilo-judge-stopped,
 .hilo-judge-status {
@@ -105,9 +87,6 @@
 .hilo-judge-diagnostics {
   margin: 0;
   padding-left: 18px;
-}
-.hilo-judge-step[data-passed="false"] {
-  color: #fca5a5;
 }
 .hilo-judge-diagnostic {
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -127,16 +106,14 @@
 }
 .hilo-judge-review .hilo-judge-file[aria-selected="true"],
 .hilo-judge-review .hilo-judge-layout[aria-pressed="true"] {
-  background: var(--color-selected, #2a2d2e);
+  background: var(--color-button);
   border-color: var(--color-text-secondary, #888);
 }
 .hilo-judge-conflict {
   margin: 0;
   padding: 8px;
   border-radius: 6px;
-  border: 1px solid #f97316;
-  background: #431407;
-  color: #fdba74;
+  border: 1px solid var(--judge-state-border);
 }
 .hilo-judge-conflict[hidden] {
   display: none;
@@ -157,7 +134,7 @@
   gap: 8px;
 }
 .hilo-judge-review .hilo-judge-accept:not(:disabled) {
-  border-color: #22c55e;
+  border-color: var(--judge-accept-border);
 }
 .hilo-judge-adjust-form {
   display: flex;

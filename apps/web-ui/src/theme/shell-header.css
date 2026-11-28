@@ -12,13 +12,13 @@
   }
 
   .hilo-inspector-toggle {
-    @apply absolute top-1/2 right-2 z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-[#858585] cursor-pointer hover:bg-selected hover:text-text-primary;
+    @apply absolute top-1/2 right-2 z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-control-muted cursor-pointer enabled:hover:bg-backdrop-control enabled:hover:text-text-primary focus-visible:bg-backdrop-control focus-visible:text-text-primary;
     -webkit-app-region: no-drag;
   }
 
   /* Left toggle: right of the macOS traffic lights; same icons mirrored horizontally. */
   .hilo-sidebar-toggle {
-    @apply absolute top-1/2 left-[134px] z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-[#858585] cursor-pointer hover:bg-selected hover:text-text-primary;
+    @apply absolute top-1/2 left-[134px] z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-control-muted cursor-pointer enabled:hover:bg-backdrop-control enabled:hover:text-text-primary focus-visible:bg-backdrop-control focus-visible:text-text-primary;
     -webkit-app-region: no-drag;
   }
 
@@ -39,7 +39,7 @@
   }
 
   .hilo-history-btn {
-    @apply absolute top-1/2 z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-[#858585] cursor-pointer hover:bg-selected hover:text-text-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[#858585];
+    @apply absolute top-1/2 z-30 inline-flex h-[26px] w-[26px] -translate-y-1/2 items-center justify-center rounded-[6px] border-0 bg-transparent text-control-muted cursor-pointer enabled:hover:bg-backdrop-control enabled:hover:text-text-primary focus-visible:bg-backdrop-control focus-visible:text-text-primary disabled:cursor-default disabled:opacity-35;
     -webkit-app-region: no-drag;
   }
 
@@ -82,7 +82,7 @@
     top: 8px;
     bottom: 8px;
     width: 1px;
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: var(--color-backdrop-divider);
     border-radius: 1px;
     pointer-events: none;
     z-index: 20;

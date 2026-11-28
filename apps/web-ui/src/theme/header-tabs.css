@@ -31,7 +31,7 @@
   }
   .hilo-header-tab:hover,
   .hilo-header-tab[aria-selected="true"] {
-    background: var(--color-selected);
+    background: var(--color-backdrop-control);
     color: var(--color-text-primary);
   }
   /* Short vertical divider between tabs; never touching the active (or hovered) one. */
@@ -43,7 +43,7 @@
     width: 1px;
     height: 14px;
     transform: translateY(-50%);
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--color-backdrop-divider);
     pointer-events: none;
   }
   .hilo-header-tab:last-child::after,
@@ -73,7 +73,7 @@
     width: 6px;
     height: 6px;
     border-radius: 999px;
-    background: var(--color-text-secondary);
+    background: var(--color-status-inactive);
   }
   .hilo-header-tab-status-dot[data-status="waiting"] {
     background: var(--agent-waiting);
@@ -137,8 +137,10 @@
   .hilo-header-tab-close:focus-visible {
     opacity: 1;
   }
-  .hilo-header-tab-close:hover {
-    background: rgba(255, 255, 255, 0.12);
+  .hilo-header-tab-close:hover,
+  .hilo-header-tab-close:focus-visible {
+    background: var(--color-button);
+    color: var(--color-text-primary);
   }
   /* Edge fades: the strip's own content fades where more tabs are hidden (state set on the header
      by attachHeaderScroll). A mask, not an overlay, so nothing next to the strip is dimmed. */
@@ -194,8 +196,10 @@
     color: var(--color-text-muted);
     cursor: pointer;
   }
-  .hilo-header-tab-add:hover:not(:disabled) {
-    background: var(--color-selected);
+  .hilo-header-tab-add:hover:not(:disabled),
+  .hilo-header-tab-add:focus-visible,
+  .hilo-header-tab-add[aria-expanded="true"] {
+    background: var(--color-backdrop-control);
     color: var(--color-text-primary);
   }
   .hilo-header-tab-add:disabled {

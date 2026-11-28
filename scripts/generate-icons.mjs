@@ -17,11 +17,12 @@ import { fileURLToPath } from "node:url";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "../apps/desktop-tauri");
 const cli = createRequire(import.meta.url).resolve("@tauri-apps/cli/tauri.js");
-const source = join(app, "branding/Icon Exports/Icon-iOS-Dark-1024@1x.png");
+const exportsDir = join(app, "branding/Icon Exports");
+const source = join(exportsDir, "Icon-iOS-Default-1024@1x.png");
 const temporary = mkdtempSync(join(tmpdir(), "hilo-icons-"));
 
-function generate(input, output) {
-  const result = spawnSync(process.execPath, [cli, "icon", input, "--output", output], {
+function generate(input, output, ...options) {
+  const result = spawnSync(process.execPath, [cli, "icon", input, "--output", output, ...options], {
     cwd: app,
     stdio: "inherit",
   });
@@ -50,7 +51,9 @@ try {
   const platformIcons = join(temporary, "platform");
   const macIcons = join(temporary, "macos");
   const macSource = join(temporary, "macos.svg");
+  const darkFavicon = join(temporary, "dark-favicon");
   generate(source, platformIcons);
+  generate(join(exportsDir, "Icon-iOS-Dark-1024@1x.png"), darkFavicon, "--png", "64");
 
   // 824 px of artwork centered in a 1024 px canvas: 100 px of transparency on each side.
   // The exported rounded corners, colors and proportions remain part of the original image.
@@ -62,6 +65,7 @@ try {
   copyFileSync(join(macIcons, "icon.icns"), join(platformIcons, "icon.icns"));
   syncFiles(platformIcons, join(app, "src-tauri/icons"));
   copyFileSync(join(platformIcons, "64x64.png"), join(app, "public/hilo.png"));
+  copyFileSync(join(darkFavicon, "64x64.png"), join(app, "public/hilo-dark.png"));
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

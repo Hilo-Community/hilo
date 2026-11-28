@@ -147,8 +147,7 @@ pub(super) fn sandbox_spec(
 /// read its output (each kills the process when its output ends, is invalid or too large).
 pub(super) struct Spawned {
     pub(super) child: Arc<Mutex<SandboxedChild>>,
-    pub(super) input: ChildInput,
-    pub(super) messages: Receiver<Result<Option<Value>, AcpError>>,
+    pub(super) connection: Connection,
     pub(super) readers: [JoinHandle<()>; 2],
 }
 
@@ -213,20 +212,31 @@ pub(super) fn spawn_agent(
         .ok_or_else(|| bad("stderr unavailable"))?;
     let child = Arc::new(Mutex::new(child));
     let limit = spec.limits.max_output_bytes;
-    let (tx, messages) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
+    let transport = Transport::new(input);
+    let owner = host.lease.task_id().to_owned();
+    let connection = Connection::attach(transport.clone(), &owner)?;
     let output_child = child.clone();
     let output_reader = thread::spawn(move || {
         let mut input = BufReader::new(OutputBudget::new(output, limit));
-        loop {
-            let item = read_message(&mut input);
-            let ended = !matches!(&item, Ok(Some(_)));
-            // Break a concurrent blocked stdin write as soon as stdout is invalid/closed.
-            if ended {
-                output_child.lock().expect("child lock").kill();
+        let error = loop {
+            match read_message(&mut input) {
+                Ok(Some(message)) => {
+                    let result = transport
+                        .lock()
+                        .map_err(|_| bad("agent transport lock poisoned"))
+                        .and_then(|mut state| state.dispatch(&owner, message));
+                    if let Err(error) = result {
+                        break Some(error);
+                    }
+                }
+                Ok(None) => break None,
+                Err(error) => break Some(error),
             }
-            if tx.send(item).is_err() || ended {
-                break;
-            }
+        };
+        // Stop first so a blocked writer cannot delay queue disconnection.
+        output_child.lock().expect("child lock").kill();
+        if let Ok(mut state) = transport.lock() {
+            state.finish_reading(error);
         }
     });
     let error_child = child.clone();
@@ -246,8 +256,7 @@ pub(super) fn spawn_agent(
     });
     Ok(Spawned {
         child,
-        input,
-        messages,
+        connection,
         readers: [output_reader, error_reader],
     })
 }

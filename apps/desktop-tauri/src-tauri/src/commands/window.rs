@@ -1,4 +1,4 @@
-//! Closing the window or quitting the app while files have unsaved changes.
+//! Closing the window or quitting the app after the UI has saved its state.
 //!
 //! The UI reports how many files have unsaved changes (it also holds the edits of projects that
 //! are not open in the editor). Closing the window, or quitting with Cmd/Ctrl+Q, is then held back
@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 use crate::state::DesktopAppState;
 
-/// Event sent to the UI when a close or quit was held back because of unsaved changes.
+/// Event sent to the UI when a close or quit is waiting for it to save its state.
 pub(crate) const CLOSE_REQUESTED_EVENT: &str = "hilo-close-requested";
 
 #[tauri::command]
@@ -18,7 +18,12 @@ pub fn report_unsaved_buffers_command(state: State<'_, DesktopAppState>, count: 
     state.unsaved_buffers.store(count, Ordering::SeqCst);
 }
 
-/// The user chose to close (saved or discarded): let the exit through.
+#[tauri::command]
+pub fn register_close_handler_command(state: State<'_, DesktopAppState>) {
+    state.close_handler_ready.store(true, Ordering::SeqCst);
+}
+
+/// The UI has finished saving state: let the exit through.
 #[tauri::command]
 pub fn confirm_exit_command(app: AppHandle, state: State<'_, DesktopAppState>) {
     state.exit_confirmed.store(true, Ordering::SeqCst);
@@ -61,7 +66,7 @@ mod tests {
     use crate::state::test_state;
 
     #[test]
-    fn closing_is_held_back_only_while_files_have_unsaved_changes() {
+    fn closing_before_the_handler_registers_is_held_back_for_unsaved_changes() {
         let data = tempfile::tempdir().unwrap();
         let state = test_state(data.path());
         // Nothing unsaved (also the state before the UI has reported anything): close freely.
@@ -72,6 +77,16 @@ mod tests {
 
         // Saved or discarded meanwhile: the UI reports 0 and nothing is held back.
         state.unsaved_buffers.store(0, Ordering::SeqCst);
+        assert!(!state.close_needs_confirmation());
+    }
+
+    #[test]
+    fn closing_waits_for_the_registered_handler_even_with_no_unsaved_files() {
+        let data = tempfile::tempdir().unwrap();
+        let state = test_state(data.path());
+        state.close_handler_ready.store(true, Ordering::SeqCst);
+        assert!(state.close_needs_confirmation());
+        state.exit_confirmed.store(true, Ordering::SeqCst);
         assert!(!state.close_needs_confirmation());
     }
 

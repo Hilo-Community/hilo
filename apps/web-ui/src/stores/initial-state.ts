@@ -3,6 +3,7 @@ import {
   inferImpactedTestsHeuristically,
 } from "../analysis/cockpit-analysis.js";
 import { AtomicStore } from "../state/atomic-store.js";
+import { IncrementalMarkdownCache } from "../ui/stream-renderer.js";
 import type { DocumentBuffers } from "./documents.js";
 import { ACTIVITY_BAR_SECTIONS } from "./types.js";
 import type {
@@ -35,9 +36,10 @@ export function createInitialStores(options?: CockpitStoreOptions) {
       },
     ]
   ).map((chat) => (chat.lastActiveAt === undefined ? { ...chat, lastActiveAt: loadedAt } : chat));
+  const visibleChats = initialChats.filter((chat) => chat.kind === "terminal" || !chat.panelHidden);
   const initialActiveChat =
-    initialChats.find((c) => c.chatId === options?.initialActiveChatId) ?? initialChats[0];
-  const initialChatId = initialActiveChat?.chatId ?? "chat-1";
+    visibleChats.find((c) => c.chatId === options?.initialActiveChatId) ?? visibleChats[0];
+  const initialChatId = initialActiveChat?.chatId ?? (initialChats.length ? "" : "chat-1");
   const initialDocId =
     options?.initialActiveDocumentId ?? initialActiveChat?.targetDocumentId ?? "src/index.ts";
   const initialDocContent =
@@ -113,7 +115,29 @@ export function createInitialStores(options?: CockpitStoreOptions) {
   const initialMessages: Record<string, readonly CockpitChatMessage[]> = {};
   const initialLogs: Record<string, readonly string[]> = {};
   for (const chat of initialChats) {
-    initialMessages[chat.chatId] = [];
+    const saved = options?.initialChatMessages?.[chat.chatId];
+    initialMessages[chat.chatId] =
+      chat.kind === "agent" && !chat.agentId && Array.isArray(saved)
+        ? saved.flatMap((message) => {
+            if (
+              !message ||
+              typeof message.messageId !== "string" ||
+              typeof message.content !== "string" ||
+              (message.role !== "user" && message.role !== "assistant" && message.role !== "system")
+            )
+              return [];
+            return [
+              {
+                messageId: message.messageId,
+                role: message.role,
+                content: message.content,
+                chatId: chat.chatId,
+                renderedHtmlBlocks: new IncrementalMarkdownCache().update(message.content),
+                streaming: false,
+              },
+            ];
+          })
+        : [];
     initialLogs[chat.chatId] = [];
   }
 

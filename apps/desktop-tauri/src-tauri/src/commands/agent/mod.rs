@@ -26,13 +26,35 @@ const MAX_LAUNCH_BYTES: usize = 24 * 1024;
 /// Never readable by the agent, whatever the task.
 const FORBIDDEN_PATHS: [&str; 5] = [".git", ".env", ".ssh", ".aws", ".hilo-tmp"];
 
-fn gate(state: &DesktopAppState) -> Result<WorkspaceTrustGate, String> {
-    let gate = state
-        .trust_gate
-        .lock()
-        .map_err(|_| "trust lock poisoned")?
-        .clone()
-        .ok_or("No workspace is open")?;
+fn gate(
+    state: &DesktopAppState,
+    expected_workspace: Option<&str>,
+) -> Result<WorkspaceTrustGate, String> {
+    let root = expected_workspace
+        .map(|path| {
+            let path = std::path::Path::new(path);
+            if !path.is_absolute() {
+                return Err("The chat's workspace must be an absolute path");
+            }
+            path.canonicalize()
+                .map_err(|_| "The chat's workspace is unavailable")
+        })
+        .transpose()?;
+    // Workspace switches take these locks in the same order.
+    let active = state.trust_gate.lock().map_err(|_| "trust lock poisoned")?;
+    let gate = match root {
+        None => active.clone(),
+        Some(root) => match active.as_ref().filter(|gate| gate.workspace_root() == root) {
+            Some(gate) => Some(gate.clone()),
+            None => state
+                .retained_gates
+                .lock()
+                .map_err(|_| "retained gates lock poisoned")?
+                .get(&root)
+                .cloned(),
+        },
+    }
+    .ok_or("Open this chat's workspace before reconnecting the agent")?;
     gate.authorize(GatedCapability::WorkspaceLocalBinary)
         .map_err(|e| e.to_string())?;
     Ok(gate)
@@ -123,11 +145,25 @@ pub(crate) fn close_agents_of(state: &DesktopAppState, root: &std::path::Path) {
 pub async fn agent_start_command(
     app: tauri::AppHandle,
     installed_agent_id: String,
+    conversation_id: Option<String>,
+    resume_session_id: Option<String>,
+    expected_workspace: Option<String>,
+    preferred_options: Option<Vec<AcpOptionPreference>>,
     events: Channel<AcpEvent>,
 ) -> Result<u32, String> {
-    tauri::async_runtime::spawn_blocking(move || start_session(&app, installed_agent_id, events))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        start_session(
+            &app,
+            installed_agent_id,
+            conversation_id,
+            resume_session_id,
+            expected_workspace,
+            preferred_options.unwrap_or_default(),
+            events,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -135,11 +171,12 @@ pub fn agent_prompt_command(
     state: tauri::State<'_, DesktopAppState>,
     id: u32,
     text: String,
+    previous_turns: Option<String>,
 ) -> Result<(), String> {
     agent(&state, id)?
         .lock()
         .map_err(|_| "agent lock poisoned")?
-        .prompt(text)
+        .prompt_with_history(text, previous_turns)
         .map_err(|e| e.to_string())
 }
 
@@ -287,17 +324,25 @@ pub async fn agent_permission_command(
     app: tauri::AppHandle,
     id: u32,
     request_id: String,
-    allow: bool,
+    allow: Option<bool>,
+    option_id: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let agent = agent(&app.state::<DesktopAppState>(), id)?;
+        if let Some(option) = option_id {
+            return agent
+                .lock()
+                .map_err(|_| "agent lock poisoned")?
+                .answer_permission_option(request_id, option)
+                .map_err(|e| e.to_string());
+        }
         let description = agent
             .lock()
             .map_err(|_| "agent lock poisoned")?
             .permission_description(&request_id)
             .ok_or("Permission request is no longer pending")?;
         // The webview requests a decision; only this native dialog confirms consent.
-        let approved = allow
+        let approved = allow.unwrap_or(false)
             && app
                 .dialog()
                 .message(format!(
@@ -342,9 +387,39 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = crate::state::test_state(data.path());
         crate::commands::workspace::load_workspace(&state, root.path().to_str().unwrap()).unwrap();
-        assert!(gate(&state).is_err());
+        assert!(gate(&state, None).is_err());
         assert!(agent(&state, 1).is_err());
-        assert!(resolve_launch(&state, "codex").is_err());
+        assert!(gate(&state, None)
+            .and_then(|gate| resolve_launch(&state, &gate, "codex"))
+            .is_err());
+    }
+
+    #[test]
+    fn a_chat_uses_its_retained_trusted_workspace_only() {
+        let data = tempfile::tempdir().unwrap();
+        let active = tempfile::tempdir().unwrap();
+        let background = tempfile::tempdir().unwrap();
+        let unknown = tempfile::tempdir().unwrap();
+        let state = crate::state::test_state(data.path());
+        crate::commands::workspace::load_workspace(&state, active.path().to_str().unwrap())
+            .unwrap();
+        let retained =
+            WorkspaceTrustGate::open(state.trust_store_path(), background.path()).unwrap();
+        retained.grant().unwrap();
+        state
+            .retained_gates
+            .lock()
+            .unwrap()
+            .insert(retained.workspace_root().to_owned(), retained.clone());
+
+        let expected = background.path().to_str().unwrap();
+        let selected = gate(&state, Some(expected)).unwrap();
+        assert_eq!(selected.workspace_root(), retained.workspace_root());
+        assert!(gate(&state, unknown.path().to_str()).is_err());
+        assert!(gate(&state, Some("relative")).is_err());
+
+        retained.close();
+        assert!(gate(&state, Some(expected)).is_err());
     }
 
     #[test]
@@ -361,10 +436,11 @@ mod tests {
             .unwrap()
             .grant()
             .unwrap();
-        assert!(resolve_launch(&state, "missing")
+        let workspace_gate = gate(&state, None).unwrap();
+        assert!(resolve_launch(&state, &workspace_gate, "missing")
             .unwrap_err()
             .contains("no installation"));
-        assert!(resolve_launch(&state, "goose")
+        assert!(resolve_launch(&state, &workspace_gate, "goose")
             .unwrap_err()
             .contains("blocked"));
         let location = data.path().join("agent-registry/packages/codex/1.0");
@@ -387,7 +463,7 @@ mod tests {
             serde_json::to_vec(&vec![installation]).unwrap(),
         )
         .unwrap();
-        let launch = resolve_launch(&state, "codex").unwrap();
+        let launch = resolve_launch(&state, &workspace_gate, "codex").unwrap();
         assert_eq!(launch.program, location.join("agent"));
         assert_eq!(launch.args, ["--acp"]);
         assert_eq!(launch.read_only_paths, [location]);
@@ -403,7 +479,9 @@ mod tests {
             .unwrap()
             .revoke()
             .unwrap();
-        assert!(resolve_launch(&state, "codex").is_err());
+        assert!(gate(&state, None)
+            .and_then(|gate| resolve_launch(&state, &gate, "codex"))
+            .is_err());
     }
 
     #[test]

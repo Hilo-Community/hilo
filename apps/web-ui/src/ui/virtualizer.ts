@@ -1,5 +1,6 @@
 import type { HiloValidationState } from "@hilo/protocol-types";
 import type { CockpitChatMessage, CockpitFileTreeNode } from "../stores/index.js";
+import { renderChatMessage } from "./stream-renderer.js";
 
 export interface VirtualWindowSlice<T> {
   readonly totalCount: number;
@@ -136,9 +137,7 @@ export class VirtualChatMessageListRenderer {
       row.style.position = "absolute";
       row.style.top = `${absoluteIndex * this.rowHeightPx}px`;
       row.style.minHeight = `${this.rowHeightPx}px`;
-      // Rendered blocks are escaped by the Markdown cache; raw content is never parsed as HTML.
-      if (msg.renderedHtmlBlocks.length > 0) row.innerHTML = msg.renderedHtmlBlocks.join("\n");
-      else row.textContent = msg.content;
+      renderChatMessage(row, msg.role, msg.content, msg.renderedHtmlBlocks);
 
       runway.appendChild(row);
     }
