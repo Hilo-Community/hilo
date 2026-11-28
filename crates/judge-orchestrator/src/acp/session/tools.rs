@@ -148,7 +148,7 @@ impl Session {
                     .lock()
                     .expect("permissions lock")
                     .insert(id.clone(), reason.clone());
-                let options = json!([{"optionId":"allow","name":"Allow once","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]);
+                let options = json!([{"optionId":"allow","name":"Allow once","kind":"allow_once","hostConfirmation":true},{"optionId":"reject","name":"Reject","kind":"reject_once","hostConfirmation":true}]);
                 (self.host.events)(AcpEvent::Permission {
                     id: id.clone(),
                     reason,
@@ -288,6 +288,33 @@ impl Session {
             );
             self.reply(&item.request, Ok(json!({"outcome":outcome})))
         }
+    }
+
+    pub(super) fn permission_option(&mut self, id: &str, option: &str) -> Result<(), AcpError> {
+        let Some(item) = self.pending.get(id) else {
+            return Ok(());
+        };
+        // Agent choices can never satisfy the Host's signed tool-approval flow.
+        if item.call.is_some()
+            || !item.options.as_array().is_some_and(|options| {
+                options
+                    .iter()
+                    .any(|entry| entry["optionId"].as_str() == Some(option))
+            })
+        {
+            return Ok(());
+        }
+        let Some(item) = self.pending.remove(id) else {
+            return Ok(());
+        };
+        self.permissions
+            .lock()
+            .expect("permissions lock")
+            .remove(id);
+        self.reply(
+            &item.request,
+            Ok(json!({"outcome":{"outcome":"selected","optionId":option}})),
+        )
     }
 
     /// The agent asks the user's permission: the panel shows it, the answer comes back through

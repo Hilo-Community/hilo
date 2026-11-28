@@ -8,7 +8,7 @@ pub mod registry;
 pub mod window;
 
 pub use gateway::{
-    BackendOutput, BoxFuture, CancellationToken, Completion, CompletionRequest, GatewayError,
-    ModelBackend, ModelGateway, PrivacyPolicy, TokenBudget,
+    BackendOutput, BoxFuture, CancellationToken, ChatMessage, ChatRequest, ChatRole, Completion,
+    CompletionRequest, GatewayError, ModelBackend, ModelGateway, PrivacyPolicy, TokenBudget,
 };
 pub use registry::{ModelEntry, ModelRegistry, RegistryError, OLLAMA_DEFAULT_ENDPOINT};

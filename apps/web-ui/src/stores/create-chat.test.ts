@@ -96,6 +96,19 @@ describe("store.toggleMaximizeChat", () => {
     expect(maximized(stores)).toBeNull();
   });
 
+  it("shows the whole tab again with showGroupTiled, keeping the selected session", () => {
+    const { stores } = setup();
+    const groupId = stores.navigation.getState().groups[0]?.id ?? "";
+    stores.toggleMaximizeChat("a");
+    stores.showGroupTiled(groupId);
+    expect(maximized(stores)).toBeNull();
+    expect(stores.zone3.getState().activeChatId).toBe("a");
+    // Already tiled or an unknown tab: nothing changes.
+    stores.showGroupTiled(groupId);
+    stores.showGroupTiled("nope");
+    expect(maximized(stores)).toBeNull();
+  });
+
   it("follows the selected session while maximized, so the header tabs switch between them", () => {
     const { stores } = setup();
     stores.toggleMaximizeChat("a");

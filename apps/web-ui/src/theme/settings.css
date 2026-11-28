@@ -17,7 +17,7 @@
     display: flex;
     min-width: 0;
     min-height: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--color-divider);
     border-radius: 16px 0 0 16px;
     overflow: hidden;
     background: var(--color-main);
@@ -45,7 +45,7 @@
     flex: 0 0 228px;
     min-height: 0;
     padding: 10px;
-    border-right: 0.5px solid rgba(255, 255, 255, 0.12);
+    border-right: 0.5px solid var(--color-sidebar-divider);
     background: var(--color-sidebar);
     /* Same row metrics as the chat sidebar (sidebar.css) */
     --settings-row-height: 28px;
@@ -53,7 +53,6 @@
     --settings-row-gap: 2px;
     --settings-leading-inset: 5px;
     --settings-icon-size: 20px;
-    --settings-icon-hover: #414141;
   }
   .hilo-settings-search {
     display: flex;
@@ -130,7 +129,7 @@
   .hilo-settings-subnav button:hover,
   .hilo-settings-nav-row[data-selected="true"],
   .hilo-settings-subnav button[aria-current="page"] {
-    background: var(--color-selected);
+    background: var(--color-button);
   }
   .hilo-settings-nav-label,
   .hilo-settings-nav-row:hover .hilo-settings-nav-label,
@@ -148,8 +147,9 @@
     padding: 2px;
     border-radius: var(--settings-row-radius);
   }
-  .hilo-settings-categories button.hilo-settings-nav-toggle:hover {
-    background: var(--settings-icon-hover);
+  .hilo-settings-categories button.hilo-settings-nav-toggle:hover:not(:disabled),
+  .hilo-settings-categories button.hilo-settings-nav-toggle:focus-visible {
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .hilo-settings-nav-toggle[aria-expanded="true"] svg {
@@ -197,7 +197,7 @@
     user-select: text;
   }
   .hilo-settings-page :focus-visible {
-    outline: 1px solid #858585;
+    outline: 1px solid var(--color-control-muted);
     outline-offset: 2px;
   }
   .hilo-settings-category {
@@ -233,7 +233,7 @@
     margin-top: 18px;
     border: 0;
     border-radius: 4px;
-    background: var(--color-selected);
+    background: transparent;
     color: var(--color-text-primary);
     padding: 6px 12px;
     font-size: 12px;
@@ -332,8 +332,10 @@
     font-size: 12px;
     cursor: pointer;
   }
+  .hilo-registry-filters button:hover:not(:disabled),
+  .hilo-registry-filters button:focus-visible,
   .hilo-registry-filters button[aria-pressed="true"] {
-    background: var(--color-selected);
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .hilo-registry-alert,
@@ -356,7 +358,7 @@
     padding: 0 10px;
     border: 0;
     border-radius: 6px;
-    background: var(--color-selected);
+    background: transparent;
     color: var(--color-text-primary);
     font-size: 12px;
     cursor: pointer;
@@ -447,7 +449,7 @@
     flex: none;
     padding: 1px 7px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--color-overlay-soft);
     color: var(--color-text-secondary);
     font-size: 11px;
   }
@@ -510,8 +512,9 @@
     height: 13px;
   }
   /* The border stays as it is on hover; a faint tint is the only feedback. */
-  .hilo-registry-actions button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.05);
+  .hilo-registry-actions button:hover:not(:disabled),
+  .hilo-registry-actions button:focus-visible {
+    background: var(--color-button);
   }
   /* Remove is a destructive action: red text and red outline. */
   .hilo-registry-actions .hilo-registry-ghost {
@@ -635,13 +638,22 @@
     justify-self: start;
     border: 0;
     border-radius: 4px;
-    background: var(--color-selected);
+    background: var(--color-button);
     color: var(--color-text-primary);
     padding: 6px 10px;
     font-size: 12px;
   }
   .hilo-inline-completion button {
+    background: transparent;
     cursor: pointer;
+  }
+  .hilo-settings-empty button:hover:not(:disabled),
+  .hilo-settings-empty button:focus-visible,
+  .hilo-registry-alert button:hover:not(:disabled),
+  .hilo-registry-alert button:focus-visible,
+  .hilo-inline-completion button:hover:not(:disabled),
+  .hilo-inline-completion button:focus-visible {
+    background: var(--color-button);
   }
   .hilo-inline-completion code {
     justify-self: start;
@@ -649,5 +661,45 @@
     background: var(--color-card);
     padding: 4px 8px;
     user-select: all;
+  }
+
+  .hilo-appearance {
+    display: grid;
+    gap: 10px;
+    max-width: 640px;
+    padding-top: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .hilo-appearance h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+  .hilo-appearance p {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+  .hilo-appearance-options {
+    display: flex;
+    gap: 8px;
+  }
+  .hilo-appearance-options button {
+    border: 1px solid var(--color-button-border);
+    border-radius: 4px;
+    background: var(--color-button);
+    color: var(--color-text-primary);
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .hilo-appearance-options button:hover {
+    background: var(--color-selected);
+  }
+  .hilo-appearance-options button.is-selected {
+    border-color: var(--agent-focus);
+    color: var(--color-text-primary);
+    font-weight: 600;
   }
 }

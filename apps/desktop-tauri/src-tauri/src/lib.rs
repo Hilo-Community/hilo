@@ -25,7 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        // Closing the window with unsaved changes: hold it back and ask the UI first.
+        // Hold the main window open until the UI has saved its state.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let held_back = window.label() == "main"
@@ -130,6 +130,8 @@ pub fn run() {
             commands::debug::debug_stop_command,
             commands::language::language_feature_command,
             commands::completion::inline_completion_command,
+            commands::completion::native_chat_command,
+            commands::completion::cancel_native_chat_command,
             commands::completion::inline_completion_status_command,
             commands::completion::set_inline_completion_settings_command,
             commands::terminal::terminal_open_command,
@@ -141,6 +143,7 @@ pub fn run() {
             commands::trust::revoke_workspace_trust_command,
             commands::window::open_settings_window_command,
             commands::window::report_unsaved_buffers_command,
+            commands::window::register_close_handler_command,
             commands::window::confirm_exit_command
         ])
         .build(tauri::generate_context!())
@@ -156,7 +159,7 @@ pub fn run() {
                 }
             }
         }
-        // Quitting (Cmd/Ctrl+Q, or the last window closing) with unsaved changes. An exit asked for
+        // Quitting (Cmd/Ctrl+Q, or the last window closing). An exit asked for
         // with a code (`app.exit`) is the one the user already confirmed.
         if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
             let held_back = code.is_none()

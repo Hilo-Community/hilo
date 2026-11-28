@@ -3,16 +3,19 @@ import { AtomicStore } from "./atomic-store.js";
 export type { PanelSide } from "../layout/panel-geometry.js";
 
 export const UI_PREFERENCES_KEY = "hilo.uiPreferences.v1";
+export type Theme = "dark" | "light";
 export interface UiPreferencesState {
   readonly sidebarWidthPx: number | null;
   readonly inspectorWidthPx: number | null;
   readonly treeHidden: boolean;
+  readonly theme: Theme;
 }
 type PreferencesStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const DEFAULTS: UiPreferencesState = {
   sidebarWidthPx: null,
   inspectorWidthPx: null,
   treeHidden: false,
+  theme: "dark",
 };
 const LEGACY_KEYS = {
   sidebarWidthPx: "hilo.sidebarWidthPx",
@@ -49,6 +52,7 @@ function read(storage?: PreferencesStorage): UiPreferencesState {
       sidebarWidthPx: width(data.sidebarWidthPx, "sidebar"),
       inspectorWidthPx: width(data.inspectorWidthPx, "inspector"),
       treeHidden: data.treeHidden === true,
+      theme: data.theme === "light" ? "light" : "dark",
     };
   } catch {
     return DEFAULTS;
@@ -73,6 +77,10 @@ export class UiPreferences extends AtomicStore<UiPreferencesState> {
     );
     this.persist();
   }
+  setTheme(theme: Theme): void {
+    this.setState((previous) => (previous.theme === theme ? previous : { ...previous, theme }));
+    this.persist();
+  }
   private persist(): void {
     try {
       this.storage?.setItem(UI_PREFERENCES_KEY, JSON.stringify(this.getState()));
@@ -81,4 +89,32 @@ export class UiPreferences extends AtomicStore<UiPreferencesState> {
       /* Preferences remain usable in memory if storage is denied or full. */
     }
   }
+}
+
+function applyTheme(doc: Document, theme: Theme): void {
+  if (theme === "light") doc.documentElement.setAttribute("data-theme", "light");
+  else doc.documentElement.removeAttribute("data-theme");
+}
+
+/**
+ * Applies the persisted theme to `doc` now, keeps it applied as `preferences` changes, and mirrors
+ * a theme change made to the same preference in another window (the desktop app's Settings window
+ * is a separate native window with its own `UiPreferences` instance over the same storage).
+ */
+export function watchTheme(doc: Document, preferences: UiPreferences): () => void {
+  applyTheme(doc, preferences.getState().theme);
+  const unsubscribe = preferences.subscribeSelector(
+    (state) => state.theme,
+    (theme) => applyTheme(doc, theme),
+  );
+  const win = doc.defaultView;
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key !== null && event.key !== UI_PREFERENCES_KEY) return;
+    preferences.setTheme(read(win?.localStorage).theme);
+  };
+  win?.addEventListener("storage", onStorage);
+  return () => {
+    unsubscribe();
+    win?.removeEventListener("storage", onStorage);
+  };
 }

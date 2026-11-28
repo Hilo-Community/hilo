@@ -1,0 +1,14 @@
+{
+  "build": {
+    "beforeBundleCommand": "mkdir -p src-tauri/gen/app-icon && xcrun actool --compile src-tauri/gen/app-icon --platform macosx --target-device mac --minimum-deployment-target 10.13 --app-icon Hilo --output-partial-info-plist src-tauri/gen/app-icon/AppIcon.plist branding/Hilo.icon"
+  },
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "infoPlist": "AppIcon.plist",
+      "files": {
+        "Resources/Assets.car": "gen/app-icon/Assets.car"
+      }
+    }
+  }
+}

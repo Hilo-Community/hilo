@@ -14,4 +14,4 @@ pub use protocol::{
     AcpError, AcpEvent, ProposedEdit, MAX_FILE_BYTES, MAX_MESSAGE_BYTES, MAX_PENDING_REQUESTS,
     MAX_TERMINAL_OUTPUT_BYTES,
 };
-pub use session::{AcpHost, AcpLaunch, AcpSessionSupervisor, AgentNetwork};
+pub use session::{AcpHost, AcpLaunch, AcpOptionPreference, AcpSessionSupervisor, AgentNetwork};

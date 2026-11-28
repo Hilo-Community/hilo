@@ -141,6 +141,10 @@ pub enum AcpEvent {
     },
     Stopped {
         reason: String,
+        /// `false` for an ordinary end (the agent exited, the lease ran out, the user stopped
+        /// it): the chat stays as it is and reconnects on the next message. `true` for a failure
+        /// the user should see.
+        failed: bool,
     },
     Error {
         reason: String,

@@ -3,9 +3,9 @@ mod common;
 use common::{closed_port, FakeServer};
 use host_core::{AuthorizedDestination, ModelProviderKind};
 use model_gateway::{
-    ollama::OllamaBackend, BackendOutput, BoxFuture, CancellationToken, CompletionRequest,
-    GatewayError, ModelBackend, ModelEntry, ModelGateway, ModelRegistry, PrivacyPolicy,
-    TokenBudget,
+    ollama::OllamaBackend, BackendOutput, BoxFuture, CancellationToken, ChatMessage, ChatRequest,
+    ChatRole, CompletionRequest, GatewayError, ModelBackend, ModelEntry, ModelGateway,
+    ModelRegistry, PrivacyPolicy, TokenBudget,
 };
 use std::{
     sync::Arc,
@@ -141,6 +141,56 @@ async fn a_failing_provider_never_falls_back_to_another_destination() {
     );
     // State is preserved: the failures only cost what their prompts may have used.
     assert_eq!(budget.used(), 2 * request().input_estimate());
+}
+
+#[tokio::test]
+async fn native_chat_uses_a_local_chat_template_and_the_shared_policy_and_budget() {
+    let server = FakeServer::start(
+        r#"{"message":{"role":"assistant","content":"local reply"},"prompt_eval_count":8,"eval_count":3}"#,
+        Duration::ZERO,
+    ).await;
+    let mut model = ModelRegistry::local_chat().entries()[0].clone();
+    model.endpoint = format!("http://{}", server.address);
+    let gateway = gateway(vec![model.clone()]);
+    let budget = TokenBudget::new(1_000);
+    let request = ChatRequest {
+        messages: vec![ChatMessage {
+            role: ChatRole::User,
+            content: "hello".into(),
+        }],
+        max_output_tokens: 32,
+    };
+    let cancel = CancellationToken::new();
+    assert!(matches!(
+        gateway
+            .chat(
+                &model.id,
+                &PrivacyPolicy::allowing(vec![]),
+                &budget,
+                &request,
+                &cancel
+            )
+            .await,
+        Err(GatewayError::PrivacyDenied(_))
+    ));
+    let result = gateway
+        .chat(
+            &model.id,
+            &PrivacyPolicy::strict_local(),
+            &budget,
+            &request,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.text, "local reply");
+    assert_eq!(budget.used(), 11);
+    let sent = server.requests.lock().unwrap()[0].clone();
+    assert!(sent.starts_with("POST /api/chat "));
+    let (_, payload) = sent.split_once("\r\n\r\n").unwrap();
+    let body: serde_json::Value = serde_json::from_str(payload).unwrap();
+    assert_eq!(body["messages"][0]["content"], "hello");
+    assert_eq!(body["model"], "qwen2.5-coder:1.5b");
 }
 
 #[tokio::test]

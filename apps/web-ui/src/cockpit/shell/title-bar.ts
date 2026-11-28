@@ -56,9 +56,11 @@ export class TitleBar {
     this.inspectorToggle = this.button(doc, "hilo-inspector-toggle", () =>
       stores.toggleInspector(),
     );
+    this.inspectorToggle.innerHTML = INSPECTOR_TOGGLE_ICONS.show;
     this.back = this.historyButton(doc, "hilo-history-back", UI_STRINGS.titleBar.back, -1);
     this.forward = this.historyButton(doc, "hilo-history-forward", UI_STRINGS.titleBar.forward, 1);
     this.sidebarToggle = this.button(doc, "hilo-sidebar-toggle", () => stores.toggleSidebar());
+    this.sidebarToggle.innerHTML = INSPECTOR_TOGGLE_ICONS.show;
 
     this.element.append(
       spacer,
@@ -133,11 +135,6 @@ export class TitleBar {
     el.setAttribute("aria-label", label);
     el.title = label;
     el.setAttribute("aria-pressed", String(!open));
-    const icon = open ? "hide" : "show";
-    if (el.dataset.icon !== icon) {
-      el.innerHTML = INSPECTOR_TOGGLE_ICONS[icon];
-      el.dataset.icon = icon;
-    }
   }
 
   /** Nearest entry in `delta` direction whose chat still exists, or -1. */

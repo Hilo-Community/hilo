@@ -1,15 +1,25 @@
-import { IncrementalMarkdownCache } from "../ui/stream-renderer.js";
+import { enhanceCodeBlocks } from "../ui/code-blocks.js";
+import { IncrementalMarkdownCache, renderChatMessage } from "../ui/stream-renderer.js";
 import { UI_STRINGS, uiText } from "../ui/ui-strings.js";
-import { ExplorationView, activityEntries, reconcileElements } from "./activity-view.js";
+import {
+  type ActivityEntry,
+  WorkGroupView,
+  activityEntries,
+  reconcileElements,
+  workDuration,
+} from "./activity-view.js";
 import { ChangesView, fileChanges } from "./changes-view.js";
 import { formatDuration } from "./duration.js";
+import { ResponseActionsView } from "./response-actions.js";
 import type { AgentState, Thought } from "./store.js";
 import { CardView, ToolCardView } from "./tool-card-view.js";
 
 export type ButtonFactory = (label: string, click: () => void) => HTMLButtonElement;
 type Actions = {
   openLocation: (path: string, line: number) => void;
-  answer: (permissionId: string, allow: boolean) => void;
+  answer: (permissionId: string, choice: boolean | string) => void;
+  /** Sends the last request again; offered under the latest finished answer. */
+  retry?: () => void;
 };
 
 /** How long a thought that has just finished stays open before it folds. */
@@ -17,9 +27,17 @@ const THOUGHT_LINGER_MS = 1000;
 
 /** One cache per panel, pruned on removal/reset. Streaming preserves disclosure DOM and focus. */
 export class ConversationView {
+  private readonly messages = new Map<
+    string,
+    { article: HTMLElement; message: AgentState["messages"][number] }
+  >();
   private readonly tools = new Map<string, ToolCardView>();
-  private readonly explorations = new Map<string, ExplorationView>();
+  private readonly groups = new Map<string, WorkGroupView>();
+  /** "Thinking…" or "Exploring…" under the latest step while a turn runs. */
+  private live: { element: HTMLElement; label: HTMLElement } | undefined;
   private readonly changes = new Map<string, ChangesView>();
+  /** The Copy / Retry row of each finished answer, by the id of the answer's first message. */
+  private readonly responses = new Map<string, ResponseActionsView>();
   private note: HTMLElement | undefined;
   private turnTime: HTMLElement | undefined;
   private readonly thoughts = new Map<string, CardView>();
@@ -48,6 +66,9 @@ export class ConversationView {
       content.push(this.note);
     }
     const messages = new Map(state.messages.map((message) => [message.id, message]));
+    for (const id of this.messages.keys()) {
+      if (!messages.has(id)) this.messages.delete(id);
+    }
     const thoughts = new Map(state.thoughts.map((thought) => [thought.id, thought]));
     const tools = new Map(state.tools.map((tool) => [tool.id, tool]));
     // Everything is drawn in the order it happened: text, then the tool it announced, then more.
@@ -57,6 +78,26 @@ export class ConversationView {
     // Tools of the turn in progress; a turn that edited several files ends with a summary.
     let turn: AgentState["tools"] = [];
     const usedChanges = new Set<string>();
+    // The agent's text of the turn being drawn: a finished turn ends with its actions row.
+    let answer: { id: string; texts: string[] } | null = null;
+    const usedResponses = new Set<string>();
+    const closeAnswer = (latest: boolean): HTMLElement | undefined => {
+      const current = answer;
+      answer = null;
+      if (!current) return undefined;
+      usedResponses.add(current.id);
+      let view = this.responses.get(current.id);
+      if (!view) {
+        view = new ResponseActionsView(doc);
+        this.responses.set(current.id, view);
+      }
+      const element = view.update(
+        current.texts.join("\n\n").trim(),
+        latest ? actions.retry : undefined,
+      );
+      content.push(element);
+      return element;
+    };
     const endTurn = () => {
       const first = turn[0];
       const files = fileChanges(turn);
@@ -86,23 +127,54 @@ export class ConversationView {
       if (ref.type === "message") {
         const message = messages.get(ref.id);
         if (!message) continue;
-        if (message.role === "user") endTurn();
-        const article = doc.createElement("article");
-        article.setAttribute("aria-label", message.role);
-        article.dataset.role = message.role;
-        article.innerHTML = message.html.join("");
+        if (message.role === "user") {
+          endTurn();
+          closeAnswer(false);
+        } else if (message.text.trim()) {
+          answer ??= { id: ref.id, texts: [] };
+          answer.texts.push(message.text);
+        }
+        const cached = this.messages.get(ref.id);
+        const article = cached?.article ?? doc.createElement("article");
+        if (
+          cached?.message.role !== message.role ||
+          cached.message.text !== message.text ||
+          cached.message.html !== message.html
+        ) {
+          renderChatMessage(article, message.role, message.text, message.html);
+          this.messages.set(ref.id, { article, message });
+        }
         content.push(article);
       } else if (ref.type === "thought") {
         const thought = thoughts.get(ref.id);
         if (thought) content.push(this.thought(doc, thought));
-      } else if (ref.type === "exploration") {
-        let view = this.explorations.get(ref.id);
-        if (!view) {
-          view = new ExplorationView(doc);
-          this.explorations.set(ref.id, view);
+      } else if (ref.type === "work") {
+        const children = ref.items.flatMap((item) => {
+          if (item.type === "tool") return [toolElement(item.tool)];
+          const thought = thoughts.get(item.id);
+          return thought ? [this.thought(doc, thought)] : [];
+        });
+        // Thinking alone, with no tool, stays a plain "Thought for 3s" row.
+        if (!ref.tools.length) {
+          content.push(...children);
+          continue;
         }
-        const children = ref.tools.map(toolElement);
-        const element = view.update(ref.tools, children);
+        let view = this.groups.get(ref.id);
+        if (!view) {
+          view = new WorkGroupView(doc);
+          this.groups.set(ref.id, view);
+        }
+        const groupThoughts = ref.items.flatMap((item) => {
+          const thought = item.type === "thought" ? thoughts.get(item.id) : undefined;
+          return thought ? [thought] : [];
+        });
+        const active = state.busy && ref === entries.at(-1);
+        const element = view.update(
+          ref.tools,
+          children,
+          active,
+          workDuration(ref.tools, groupThoughts),
+        );
         if (ref.tools.some((tool) => tool.status === "pending")) waiting = element;
         content.push(element);
       } else {
@@ -111,9 +183,19 @@ export class ConversationView {
         content.push(toolElement(tool));
       }
     }
-    if (!state.busy) endTurn();
+    let actionsRow: HTMLElement | undefined;
+    if (!state.busy) {
+      endTurn();
+      actionsRow = closeAnswer(true);
+    } else answer = null;
+    for (const [key, view] of this.responses)
+      if (!usedResponses.has(key)) {
+        view.dispose();
+        this.responses.delete(key);
+      }
     for (const key of this.changes.keys()) if (!usedChanges.has(key)) this.changes.delete(key);
     if (state.plan.length) content.push(planList(doc, state.plan));
+    if (state.busy && !state.permissions.length) content.push(this.liveLine(doc, entries.at(-1)));
     // How long the turn took, once it is over: where the time went is worth knowing.
     const timing = state.turn;
     if (timing?.endedAt !== undefined && !state.busy && state.timeline.length) {
@@ -124,13 +206,12 @@ export class ConversationView {
         formatDuration(timing.endedAt - timing.startedAt),
         waiting,
       );
-      content.push(this.turnTime);
+      // Beside the latest answer's actions, as one quiet footer; on its own otherwise.
+      if (actionsRow) actionsRow.append(this.turnTime);
+      else content.push(this.turnTime);
     }
-    const groupIds = new Set(
-      entries.filter((ref) => ref.type === "exploration").map((ref) => ref.id),
-    );
-    for (const key of this.explorations.keys())
-      if (!groupIds.has(key)) this.explorations.delete(key);
+    const groupIds = new Set(entries.filter((ref) => ref.type === "work").map((ref) => ref.id));
+    for (const key of this.groups.keys()) if (!groupIds.has(key)) this.groups.delete(key);
     for (const key of this.tools.keys())
       if (!state.tools.some((tool) => tool.id === key)) this.tools.delete(key);
     for (const key of this.thoughts.keys())
@@ -155,10 +236,27 @@ export class ConversationView {
         reason.textContent = permission.reason;
         const choices = doc.createElement("div");
         choices.className = "hilo-agent-permission-actions";
-        choices.append(
-          button(UI_STRINGS.agent.allow, () => actions.answer(permission.id, true)),
-          button(UI_STRINGS.agent.reject, () => actions.answer(permission.id, false)),
-        );
+        const options: unknown[] = Array.isArray(permission.options) ? permission.options : [];
+        for (const value of options) {
+          if (typeof value !== "object" || value === null) continue;
+          const { optionId, name, hostConfirmation } = value as Record<string, unknown>;
+          if (
+            typeof optionId !== "string" ||
+            !optionId ||
+            optionId.length > 256 ||
+            typeof name !== "string" ||
+            !name ||
+            hostConfirmation === true
+          )
+            continue;
+          choices.append(button(name, () => actions.answer(permission.id, optionId)));
+        }
+        if (!choices.childElementCount) {
+          choices.append(
+            button(UI_STRINGS.agent.allow, () => actions.answer(permission.id, true)),
+            button(UI_STRINGS.agent.reject, () => actions.answer(permission.id, false)),
+          );
+        }
         view.body.append(reason, choices);
         view.update("permission", "pending", UI_STRINGS.agent.waitingPermission, "", true, true);
         cached = { view, reason: permission.reason };
@@ -172,6 +270,31 @@ export class ConversationView {
       waiting = at >= 0 ? cached.view.element : null;
     }
     return content;
+  }
+  /**
+   * Where the turn is now, under everything it has written: "Exploring…" while a tool of the
+   * latest step runs, otherwise "Thinking…" (before the first word, between tools, while text
+   * streams). One element, so changing phase never moves the text above it.
+   */
+  private liveLine(doc: Document, last: ActivityEntry | undefined): HTMLElement {
+    if (!this.live) {
+      const element = doc.createElement("div");
+      element.className = "hilo-agent-live";
+      element.setAttribute("role", "status");
+      const label = doc.createElement("span");
+      label.className = "hilo-agent-live-label";
+      element.append(label);
+      this.live = { element, label };
+    }
+    const step = last?.type === "work" ? last.items.at(-1) : undefined;
+    const exploring =
+      step?.type === "tool" &&
+      step.tool.kind !== "think" &&
+      (step.tool.status === "running" || step.tool.status === "pending");
+    const text = exploring ? UI_STRINGS.agent.exploring : UI_STRINGS.agent.thinking;
+    if (this.live.label.textContent !== text) this.live.label.textContent = text;
+    this.live.element.dataset.phase = exploring ? "exploring" : "thinking";
+    return this.live.element;
   }
   private thought(doc: Document, thought: Thought): HTMLElement {
     let view = this.thoughts.get(thought.id);
@@ -190,6 +313,7 @@ export class ConversationView {
     if (kept.source !== source || !view.body.firstChild) {
       kept.source = source;
       view.body.innerHTML = kept.cache.update(source).join("");
+      enhanceCodeBlocks(view.body);
     }
     const label = thought.running
       ? UI_STRINGS.agent.thinking
@@ -224,6 +348,7 @@ export class ConversationView {
   }
   /** Stops the timers that fold finished thoughts. */
   dispose(): void {
+    for (const view of this.responses.values()) view.dispose();
     for (const timer of this.lingering.values()) clearTimeout(timer);
     this.lingering.clear();
   }

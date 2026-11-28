@@ -2,6 +2,7 @@
 //! account, no key. The text around the cursor is read from the Host's rope, never from the
 //! webview, and every keystroke the Host receives cancels the call in flight.
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -15,8 +16,8 @@ use model_gateway::{
     memory::{self, Recommendation},
     ollama::{self, OllamaBackend},
     window::{context_bounds, MAX_OUTPUT_TOKENS},
-    CancellationToken, CompletionRequest, GatewayError, ModelGateway, ModelRegistry, PrivacyPolicy,
-    TokenBudget, OLLAMA_DEFAULT_ENDPOINT,
+    CancellationToken, ChatMessage, ChatRequest, ChatRole, CompletionRequest, GatewayError,
+    ModelGateway, ModelRegistry, PrivacyPolicy, TokenBudget, OLLAMA_DEFAULT_ENDPOINT,
 };
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -48,12 +49,14 @@ impl Default for CompletionSettings {
 
 pub(crate) struct CompletionState {
     gateway: Arc<ModelGateway>,
+    chat_gateway: ModelGateway,
     budget: Arc<TokenBudget>,
     settings: Mutex<CompletionSettings>,
     settings_path: PathBuf,
     /// The call in flight and its request number (at most one: a new one cancels the last).
     inflight: Mutex<Option<(u64, CancellationToken)>>,
     next_request: AtomicU64,
+    native_chats: Mutex<BTreeMap<String, CancellationToken>>,
 }
 
 impl CompletionState {
@@ -68,11 +71,16 @@ impl CompletionState {
                 host_core::ModelProviderKind::LocalOllama,
                 Arc::new(OllamaBackend::new(Duration::from_secs(20))),
             )),
+            chat_gateway: ModelGateway::new(ModelRegistry::local_chat()).with_backend(
+                host_core::ModelProviderKind::LocalOllama,
+                Arc::new(OllamaBackend::new(Duration::from_secs(90))),
+            ),
             budget: Arc::new(TokenBudget::new(SESSION_TOKEN_BUDGET)),
             settings: Mutex::new(settings),
             settings_path,
             inflight: Mutex::new(None),
             next_request: AtomicU64::new(0),
+            native_chats: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -99,6 +107,85 @@ impl CompletionState {
             }
         })
     }
+}
+
+#[tauri::command]
+pub async fn native_chat_command(
+    app: tauri::AppHandle,
+    request_id: String,
+    messages: Vec<ChatMessage>,
+) -> Result<String, String> {
+    if request_id.is_empty()
+        || request_id.len() > 64
+        || messages.len() > 64
+        || messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum::<usize>()
+            > 256 * 1024
+        || !messages.last().is_some_and(|message| {
+            message.role == ChatRole::User && !message.content.trim().is_empty()
+        })
+    {
+        return Err("Invalid native chat request".into());
+    }
+    let state = app.state::<DesktopAppState>();
+    let model = &state.completion;
+    let Recommendation::Local { model_id } =
+        memory::recommend(model.chat_gateway.registry(), memory::available_memory())
+    else {
+        return Err("Not enough memory for the local chat model".into());
+    };
+    let cancel = CancellationToken::new();
+    {
+        let mut calls = model
+            .native_chats
+            .lock()
+            .map_err(|_| "native chat lock poisoned")?;
+        if calls.len() >= 16 || calls.contains_key(&request_id) {
+            return Err("Native chat request already running or queue is full".into());
+        }
+        calls.insert(request_id.clone(), cancel.clone());
+    }
+    let request = ChatRequest {
+        messages,
+        max_output_tokens: 2_048,
+    };
+    let reply = model
+        .chat_gateway
+        .chat(
+            &model_id,
+            &PrivacyPolicy::strict_local(),
+            &model.budget,
+            &request,
+            &cancel,
+        )
+        .await;
+    model
+        .native_chats
+        .lock()
+        .map_err(|_| "native chat lock poisoned")?
+        .remove(&request_id);
+    reply
+        .map(|completion| completion.text)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn cancel_native_chat_command(
+    state: tauri::State<'_, DesktopAppState>,
+    request_id: String,
+) -> Result<(), String> {
+    if let Some(token) = state
+        .completion
+        .native_chats
+        .lock()
+        .map_err(|_| "native chat lock poisoned")?
+        .get(&request_id)
+    {
+        token.cancel();
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

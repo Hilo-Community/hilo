@@ -29,6 +29,25 @@ export function sessionDisplayTitle(title: string): string {
   return number ? `${name} ${number}` : title;
 }
 
+const relativeFormat = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+const RELATIVE_UNITS: ReadonlyArray<readonly [Intl.RelativeTimeFormatUnit, number]> = [
+  ["year", 365 * 24 * 60 * 60_000],
+  ["month", 30 * 24 * 60 * 60_000],
+  ["week", 7 * 24 * 60 * 60_000],
+  ["day", 24 * 60 * 60_000],
+  ["hour", 60 * 60_000],
+  ["minute", 60_000],
+];
+
+/** "just now", "23 minutes ago", "yesterday"…: how long ago `time` was, at `now` (both in ms). */
+export function relativeTime(time: number, now: number): string {
+  const elapsed = Math.max(0, now - time);
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (elapsed >= size) return relativeFormat.format(-Math.floor(elapsed / size), unit);
+  }
+  return UI_STRINGS.sidebar.justNow;
+}
+
 /** All row controls are siblings: options never activate selection or expansion. */
 export class SidebarRow {
   readonly el: HTMLDivElement;
@@ -37,6 +56,7 @@ export class SidebarRow {
   readonly add: HTMLButtonElement | undefined;
   readonly toggle: HTMLButtonElement | undefined;
   private readonly title: HTMLSpanElement;
+  private subtitle: HTMLSpanElement | undefined;
   private readonly kind: SidebarRowOptions["kind"];
   private readonly arrow: HTMLSpanElement;
   private renameInput: HTMLInputElement | undefined;
@@ -53,7 +73,15 @@ export class SidebarRow {
     this.select = button(doc, "sidebar-row-select");
     this.title = doc.createElement("span");
     this.title.className = "sidebar-row-title";
-    this.select.appendChild(this.title);
+    if (options.kind === "session") {
+      // Title and an optional second line ("23 minutes ago") stacked next to the icon.
+      const text = doc.createElement("span");
+      text.className = "sidebar-row-text";
+      text.appendChild(this.title);
+      this.select.appendChild(text);
+    } else {
+      this.select.appendChild(this.title);
+    }
     this.select.addEventListener("click", options.onSelect);
     this.arrow = doc.createElement("span");
     this.arrow.className = "sidebar-chevron";
@@ -133,6 +161,21 @@ export class SidebarRow {
       })();
     target.dataset.status = status;
     target.innerHTML = status === "running" ? SPINNER_ICON : "";
+  }
+
+  /** A second, smaller line under a session's title; null removes it. */
+  setSubtitle(text: string | null): void {
+    if (text === null) {
+      this.subtitle?.remove();
+      this.subtitle = undefined;
+      return;
+    }
+    if (!this.subtitle) {
+      this.subtitle = this.el.ownerDocument.createElement("span");
+      this.subtitle.className = "sidebar-row-subtitle";
+      this.title.after(this.subtitle);
+    }
+    label(this.subtitle, text);
   }
 
   update(title: string, selected: boolean, expanded?: boolean): void {

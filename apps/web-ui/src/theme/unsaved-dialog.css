@@ -44,7 +44,7 @@
     padding: 0 10px;
     border: 0;
     border-radius: 6px;
-    background: var(--color-selected);
+    background: transparent;
     color: var(--color-text-primary);
     font-size: 12px;
     cursor: pointer;
@@ -53,14 +53,16 @@
     outline: 2px solid rgba(255, 255, 255, 0.5);
     outline-offset: 2px;
   }
-  .hilo-unsaved-actions button:hover {
-    background: rgba(255, 255, 255, 0.14);
+  .hilo-unsaved-actions button:hover:not(:disabled),
+  .hilo-unsaved-actions button:focus-visible {
+    background: var(--color-button);
   }
   .hilo-unsaved-actions .hilo-unsaved-primary {
     background: #e8e8e8;
     color: #1a1a1a;
   }
-  .hilo-unsaved-actions .hilo-unsaved-primary:hover {
+  .hilo-unsaved-actions .hilo-unsaved-primary:hover,
+  .hilo-unsaved-actions .hilo-unsaved-primary:focus-visible {
     background: #fff;
   }
 }

@@ -1,8 +1,69 @@
 /**
- * Renders one Markdown block (text between blank lines) to HTML for the agent conversation.
- * Agent text is untrusted: everything is escaped first and only the tags built here are emitted.
- * Links are never made clickable (a click would navigate the webview), images are not loaded.
+ * Renders the Markdown of a conversation to HTML with markdown-it (CommonMark + tables,
+ * strikethrough, nested lists, block quotes, headings) and sanitizes the result with DOMPurify.
+ *
+ * Agent text is untrusted:
+ * - raw HTML in the text is escaped by markdown-it (`html: false`), never emitted;
+ * - links never become `<a>`: a click would navigate the webview. A reference to a project file
+ *   (`src/a.ts:12`) becomes inline text the panel opens in the editor; a web address is shown with
+ *   its address as a tooltip; anything else is its label only;
+ * - images are not loaded (their syntax renders as text);
+ * - DOMPurify then keeps only the tags and attributes listed below.
  */
+import DOMPurify from "dompurify";
+import MarkdownIt from "markdown-it";
+import type { MarkdownIt as Parser, Token } from "markdown-it";
+import { UI_STRINGS } from "./ui-strings.js";
+
+/** A table or list longer than this is cut: one message must not build an enormous DOM. */
+const MAX_ROWS = 200;
+/** Where an agent's snapshot lives: absolute paths in its text point into it. */
+const SNAPSHOT_ROOT = /^.*\/agent-worktrees\/[^/]+\/acp-[^/]+\//;
+/** `path` or `path:line`, no scheme, query, fragment or backslash. */
+const FILE_REFERENCE = /^([^\s:#?\\]+?)(?::(\d{1,7}))?$/;
+
+const ALLOWED_TAGS = [
+  "div",
+  "button",
+  "p",
+  "br",
+  "strong",
+  "em",
+  "s",
+  "code",
+  "pre",
+  "span",
+  "ul",
+  "ol",
+  "li",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "blockquote",
+  "hr",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+];
+const ALLOWED_ATTR = [
+  "class",
+  "type",
+  "aria-label",
+  "title",
+  "role",
+  "tabindex",
+  "start",
+  "style",
+  "data-path",
+  "data-line",
+  "data-lang",
+];
 
 function escapeHtml(raw: string): string {
   return raw
@@ -12,123 +73,113 @@ function escapeHtml(raw: string): string {
     .replaceAll('"', "&quot;");
 }
 
-/** Marks where a piece was lifted out of a line: a private-use character no text has. */
-const HOLE = "\uE000";
-const HOLES = new RegExp(`${HOLE}(\\d+)${HOLE}`, "g");
-/** `[label](destination)`, the destination bare or between angle brackets (as agents write it). */
-const LINK = /\[([^\]\n]{1,300})\]\((&lt;[^\n]{1,1000}?&gt;|[^)\s]{1,1000})\)/g;
-/** Where an agent's snapshot lives: absolute paths in its text point into it. */
-const SNAPSHOT_ROOT = /^.*\/agent-worktrees\/[^/]+\/acp-[^/]+\//;
+function decode(href: string): string {
+  try {
+    return decodeURI(href);
+  } catch {
+    return href;
+  }
+}
 
-/**
- * What a link in an agent's text becomes. A reference to a file of the project (`src/a.ts:12`)
- * becomes inline text the panel turns into "open that file there"; a web address is only shown, with
- * its address as a tooltip, because following it would take over the app's window.
- */
-function renderLink(label: string, rawDestination: string): string {
-  const destination = rawDestination.replace(/^&lt;|&gt;$/g, "").replace(SNAPSHOT_ROOT, "");
-  const reference = /^([^\s:#?\\]+?)(?::(\d{1,7}))?$/.exec(destination);
+/** The opening tag a link becomes, and its closing tag (empty when it is plain text). */
+function linkTags(href: string): [string, string] {
+  const destination = decode(href).replace(SNAPSHOT_ROOT, "");
+  const reference = FILE_REFERENCE.exec(destination);
   const path = reference?.[1];
   if (path && !path.startsWith("/") && !path.split("/").includes("..")) {
     const line = Number(reference?.[2] ?? 1) || 1;
+    const where = escapeHtml(path);
     // Plain inline text that acts as a link: it flows and wraps with the sentence around it.
-    return `<span role="link" tabindex="0" class="hilo-agent-ref" data-path="${path}" data-line="${line}" title="${path}:${line}">${label}</span>`;
+    return [
+      `<span role="link" tabindex="0" class="hilo-agent-ref" data-path="${where}" data-line="${line}" title="${where}:${line}">`,
+      "</span>",
+    ];
   }
   if (/^https?:\/\//i.test(destination))
-    return `<span class="hilo-agent-link" title="${destination}">${label}</span>`;
-  return label;
+    return [`<span class="hilo-agent-link" title="${escapeHtml(destination)}">`, "</span>"];
+  return ["", ""];
 }
 
-/**
- * Code spans, links, bold and italics inside one line. Code and links are lifted out first so
- * they stay literal, and put back after, so bold can wrap code (`**the `latest` tag**`).
- */
-export function renderInline(text: string): string {
-  const parts: string[] = [];
-  const lift = (html: string) => {
-    parts.push(html);
-    return `${HOLE}${parts.length - 1}${HOLE}`;
+/** Drops table rows and list items past `MAX_ROWS` in each table or list. */
+function limitRows(tokens: Token[]): Token[] {
+  const kept: Token[] = [];
+  const counts: number[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] as Token;
+    if ((token.type === "tr_open" || token.type === "list_item_open") && counts.length) {
+      const top = counts.length - 1;
+      counts[top] = (counts[top] ?? 0) + 1;
+      if ((counts[top] ?? 0) > MAX_ROWS) {
+        // Skip to the matching close.
+        let depth = 0;
+        for (; i < tokens.length; i += 1) {
+          depth += (tokens[i] as Token).nesting;
+          if (depth === 0) break;
+        }
+        continue;
+      }
+    }
+    if (/^(thead|tbody|bullet_list|ordered_list)_open$/.test(token.type)) counts.push(0);
+    if (/^(thead|tbody|bullet_list|ordered_list)_close$/.test(token.type)) counts.pop();
+    kept.push(token);
+  }
+  return kept;
+}
+
+function createParser(): Parser {
+  const md = new MarkdownIt({ html: false, linkify: true, breaks: true, typographer: false });
+  // Agents fence their code; an indented line (a list continuation after a blank line, split
+  // into its own streaming block) must stay text, not turn into a code block. No images.
+  md.disable(["code", "image"]);
+  // Only explicit addresses become links: `README.md` or `App.swift` are not web sites.
+  md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false });
+  md.core.ruler.push("hilo_limit_rows", (state) => {
+    state.tokens = limitRows(state.tokens);
+  });
+  const closings: string[] = [];
+  md.renderer.rules.link_open = (tokens, idx) => {
+    const [open, close] = linkTags(String(tokens[idx]?.attrGet("href") ?? ""));
+    closings.push(close);
+    return open;
   };
-  const restore = (value: string) =>
-    value.replace(HOLES, (_, index: string) => parts[Number(index)] ?? "");
-  return restore(
-    escapeHtml(text.replaceAll(HOLE, ""))
-      .replace(/`([^`]+)`/g, (_, code: string) => lift(`<code>${code}</code>`))
-      .replace(LINK, (_, label: string, destination: string) =>
-        lift(renderLink(restore(label), destination)),
-      )
-      .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>"),
-  );
+  md.renderer.rules.link_close = () => closings.pop() ?? "";
+  // A rounded card: the language and a Copy button above the code (`code-blocks.ts` colours it).
+  md.renderer.rules.fence = (tokens, idx) => {
+    const token = tokens[idx];
+    const lang = escapeHtml((token?.info ?? "").trim().split(/\s+/)[0] ?? "");
+    const { copy, copyLabel, plain } = UI_STRINGS.code;
+    return (
+      `<div class="hilo-code"><div class="hilo-code-header"><span class="hilo-code-lang">${lang || plain}</span>` +
+      `<button type="button" class="hilo-code-copy" aria-label="${copyLabel}">${copy}</button></div>` +
+      `<pre data-lang="${lang}"><code>${escapeHtml(token?.content ?? "")}</code></pre></div>`
+    );
+  };
+  return md;
 }
 
-const SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
-const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s+(.*)$/;
-const HEADING = /^(#{1,6}) +(.*)$/;
-/** A table or list longer than this is cut: one message must not build an enormous DOM. */
-const MAX_ROWS = 200;
+const parser = createParser();
+let hooked = false;
 
-function cells(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
+/** DOMPurify needs a DOM; without one (a non-browser test) markdown-it's escaping still holds. */
+function sanitize(html: string): string {
+  if (!DOMPurify.isSupported) return html;
+  if (!hooked) {
+    hooked = true;
+    // The only style markdown-it writes is a table column's alignment.
+    DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
+      if (data.attrName === "style" && !/^text-align:(left|right|center)$/.test(data.attrValue))
+        data.keepAttr = false;
+    });
+  }
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false });
 }
 
-function table(lines: string[]): string {
-  const head = cells(lines[0] ?? "");
-  const align = cells(lines[1] ?? "").map((cell) =>
-    cell.startsWith(":") && cell.endsWith(":")
-      ? "center"
-      : cell.endsWith(":")
-        ? "right"
-        : cell.startsWith(":")
-          ? "left"
-          : "",
-  );
-  const cell = (tag: string, text: string, i: number) =>
-    `<${tag}${align[i] ? ` style="text-align:${align[i]}"` : ""}>${renderInline(text)}</${tag}>`;
-  const rows = lines.slice(2, 2 + MAX_ROWS).map(
-    (line) =>
-      `<tr>${cells(line)
-        .map((text, i) => cell("td", text, i))
-        .join("")}</tr>`,
-  );
-  return (
-    `<table><thead><tr>${head.map((text, i) => cell("th", text, i)).join("")}</tr></thead>` +
-    `<tbody>${rows.join("")}</tbody></table>`
-  );
-}
-
+/** One Markdown block (text between blank lines, or a whole message). */
 export function renderMarkdownBlock(block: string): string {
-  const trimmed = block.trim();
-  if (trimmed.startsWith("```")) {
-    const firstNewline = trimmed.indexOf("\n");
-    const lang = firstNewline > 3 ? trimmed.slice(3, firstNewline).trim() : "";
-    const body =
-      firstNewline >= 0
-        ? trimmed.slice(firstNewline + 1).replace(/```$/, "")
-        : trimmed.slice(3).replace(/```$/, "");
-    return `<pre data-lang="${escapeHtml(lang)}"><code>${escapeHtml(body)}</code></pre>`;
-  }
-  const lines = trimmed.split("\n");
-  const heading = HEADING.exec(lines[0] ?? "");
-  if (heading?.[1] && heading[2] !== undefined) {
-    const level = heading[1].length;
-    const rest = lines.slice(1).join("\n");
-    return `<h${level}>${renderInline(heading[2])}</h${level}>${rest.trim() ? renderMarkdownBlock(rest) : ""}`;
-  }
-  if (lines.length >= 2 && lines[0]?.includes("|") && SEPARATOR.test(lines[1] ?? "")) {
-    return table(lines);
-  }
-  if (lines.every((line) => LIST_ITEM.test(line))) {
-    const ordered = /^\s*\d/.test(lines[0] ?? "");
-    const items = lines
-      .slice(0, MAX_ROWS)
-      .map((line) => `<li>${renderInline(LIST_ITEM.exec(line)?.[2] ?? "")}</li>`);
-    return `<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`;
-  }
-  return `<p>${lines.map(renderInline).join("<br>")}</p>`;
+  return sanitize(parser.render(block)).trim();
+}
+
+/** The inline Markdown of one line: code spans, links, bold, italics, strikethrough. */
+export function renderInline(text: string): string {
+  return sanitize(parser.renderInline(text));
 }

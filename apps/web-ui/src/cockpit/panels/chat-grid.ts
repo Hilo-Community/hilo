@@ -7,6 +7,7 @@ import { MORE_ICON, PLUS_ICON } from "../../sidebar/icons.js";
 import { SidebarMenu, type SidebarMenuAction } from "../../sidebar/sidebar-menu.js";
 import { sessionDisplayTitle } from "../../sidebar/sidebar-row.js";
 import {
+  type CockpitChatMessage,
   type CockpitChatTab,
   type CockpitStoreBundle,
   HILO_DESIGN_TOKENS,
@@ -15,7 +16,9 @@ import {
 } from "../../stores/index.js";
 import { type AgentBadgeInputs, nextAgentBadge } from "../../stores/session-status.js";
 import { SETTINGS_ICON } from "../../theme/icons.js";
+import { ChatComposer, type NativeChatHost } from "../../ui/chat-composer.js";
 import { reconcile } from "../../ui/dom-utils.js";
+import { IncrementalMarkdownCache, renderChatMessage } from "../../ui/stream-renderer.js";
 import { UI_STRINGS, uiText } from "../../ui/ui-strings.js";
 import { VirtualChatMessageListRenderer } from "../../ui/virtualizer.js";
 import {
@@ -118,8 +121,17 @@ export class ChatGrid {
   /** One pane per terminal session, alive for as long as the session exists (any group). */
   private readonly panes = new Map<string, TerminalPane>();
   private readonly agentPanes = new Map<string, AgentPanel>();
+  private readonly nativePanes = new Map<
+    string,
+    {
+      wrapper: HTMLElement;
+      composer: ChatComposer;
+      status: HTMLElement;
+      requestId: string | undefined;
+    }
+  >();
   private readonly newPanelMenu: NewPanelMenu;
-  private readonly restoredChats: ReadonlySet<string>;
+  private readonly restoredChats: Set<string>;
   private readonly stopOpenRequests: (() => void) | undefined;
   private readonly stopPanelShortcuts: () => void;
   private focusedTerminalId: string | null = null;
@@ -141,8 +153,14 @@ export class ChatGrid {
     registry?: AgentRegistryHost,
     /** Opens the project picker; the empty state offers it when no project is open. */
     private readonly openProject?: () => void,
+    private readonly nativeChat?: NativeChatHost,
   ) {
-    this.restoredChats = new Set(stores.zone3.getState().chats.map((chat) => chat.chatId));
+    this.restoredChats = new Set(
+      stores.zone3
+        .getState()
+        .chats.filter((chat) => chat.kind === "agent" && chat.agentId)
+        .map((chat) => chat.chatId),
+    );
     this.newPanelMenu = new NewPanelMenu(doc, registry);
     this.stopOpenRequests = registry?.onOpenRequested?.((agent) => this.openAgent(agent));
     const onPanelShortcut = (event: KeyboardEvent) => this.runPanelShortcut(event);
@@ -150,7 +168,7 @@ export class ChatGrid {
     this.stopPanelShortcuts = () => doc.removeEventListener("keydown", onPanelShortcut);
     this.element = doc.createElement("main");
     this.element.className =
-      "hilo-zone-3-multichat bg-main border-t border-b border-l border-white/8 flex flex-col h-full";
+      "hilo-zone-3-multichat bg-main border-t border-b border-l border-divider flex flex-col h-full";
     this.element.setAttribute("aria-label", UI_STRINGS.shell.chatGrid);
     this.element.style.minWidth = "0";
     this.element.style.overflow = "hidden";
@@ -205,6 +223,18 @@ export class ChatGrid {
               openTerminal: () => this.stores.createChat({ kind: "terminal", nextToActive: true }),
             }
           : {}),
+        ...(this.nativeChat
+          ? {
+              openLocalChat: () =>
+                this.stores.createChat({
+                  kind: "agent",
+                  native: true,
+                  title: UI_STRINGS.chat.localChat,
+                  modelName: UI_STRINGS.chat.localChat,
+                  nextToActive: true,
+                }),
+            }
+          : {}),
         openAgentInterface: (agent) => this.openAgent(agent),
         installAgents: () => this.settings?.select(),
       }),
@@ -224,12 +254,11 @@ export class ChatGrid {
         else {
           this.settings?.selectWorkspace();
           this.stores.selectChat(chatId);
-          this.agentPanes.get(chatId)?.activate();
         }
       },
       onClose: (chatId) => {
         if (chatId === "hilo:settings") this.settings?.close();
-        else this.stores.closeChat(chatId);
+        else this.closePanel(chatId);
       },
       trailing: [this.addButton],
     });
@@ -322,6 +351,10 @@ export class ChatGrid {
     this.updateActions();
   }
 
+  async flushTranscripts(): Promise<void> {
+    await Promise.all(Array.from(this.agentPanes.values(), (pane) => pane.flushTranscript()));
+  }
+
   destroy(): void {
     this.panelDrag.cancel();
     this.resizeObserver?.disconnect();
@@ -332,6 +365,7 @@ export class ChatGrid {
     this.panes.clear();
     for (const pane of this.agentPanes.values()) pane.destroy();
     this.agentPanes.clear();
+    for (const id of this.nativePanes.keys()) this.removeNativePane(id);
     this.tabs.destroy();
   }
 
@@ -341,6 +375,15 @@ export class ChatGrid {
     const navigation = this.stores.navigation.getState();
     const activeGroup = navigation.groups.find((group) => group.id === navigation.activeGroupId);
     const chatsById = new Map(z3.chats.map((chat) => [chat.chatId, chat]));
+    for (const id of this.nativePanes.keys()) {
+      if (!chatsById.has(id)) this.removeNativePane(id);
+    }
+    for (const id of this.restoredChats) {
+      if (chatsById.has(id)) continue;
+      this.restoredChats.delete(id);
+      if (!this.agentPanes.has(id))
+        void this.agents?.host.transcripts?.remove(id).catch(() => undefined);
+    }
     for (const [id, pane] of this.agentPanes) {
       if (!chatsById.has(id)) {
         // The session was closed: its saved conversation goes with it.
@@ -349,7 +392,9 @@ export class ChatGrid {
         this.agentPanes.delete(id);
       }
     }
-    const chats = (activeGroup?.chatIds ?? []).flatMap((id) => chatsById.get(id) ?? []);
+    const chats = (activeGroup?.chatIds ?? [])
+      .flatMap((id) => chatsById.get(id) ?? [])
+      .filter((chat) => chat.kind === "terminal" || !chat.panelHidden);
     const specs = chats.map((chat): HeaderTabSpec => {
       const token = HILO_DESIGN_TOKENS[chat.validationState];
       return {
@@ -408,7 +453,7 @@ export class ChatGrid {
     actions.push(
       keyed("close", {
         label: text.closePanel,
-        run: () => this.stores.closeChat(chatId),
+        run: () => this.closePanel(chatId),
         disabled: !closable,
         ...(closable ? {} : { reason: text.cannotClose }),
         separatorBefore: actions.length > 0,
@@ -428,6 +473,12 @@ export class ChatGrid {
     entry.run();
   }
 
+  private closePanel(chatId: string): void {
+    const chat = this.stores.zone3.getState().chats.find((item) => item.chatId === chatId);
+    if (chat?.kind === "agent" && chat.agentId) this.stores.hideChatPanel(chatId);
+    else this.stores.closeChat(chatId);
+  }
+
   /** A session with a running or queued agent cannot be closed. */
   private canCloseSession(chatId: string): boolean {
     const z3 = this.stores.zone3.getState();
@@ -438,7 +489,11 @@ export class ChatGrid {
     const z3 = this.stores.zone3.getState();
     const navigation = this.stores.navigation.getState();
     const activeGroup = navigation.groups.find((group) => group.id === navigation.activeGroupId);
-    const chatsById = new Map(z3.chats.map((chat) => [chat.chatId, chat]));
+    const chatsById = new Map(
+      z3.chats
+        .filter((chat) => chat.kind === "terminal" || !chat.panelHidden)
+        .map((chat) => [chat.chatId, chat]),
+    );
     let layout = activeGroup ? resolveGroupLayout(activeGroup) : null;
     // A group can still list a chat that no longer exists.
     if (layout && panelIds(layout).some((id) => !chatsById.has(id))) {
@@ -562,6 +617,7 @@ export class ChatGrid {
     if (this.agents && chat.agentId) {
       let pane = this.agentPanes.get(chat.chatId);
       if (!pane) {
+        const cwd = chat.cwd ?? this.stores.navigation.getState().projectPath;
         pane = new AgentPanel(
           this.grid.ownerDocument,
           this.agents.host,
@@ -569,7 +625,12 @@ export class ChatGrid {
           { agentId: chat.agentId, name: chat.agentName ?? chat.title },
           !this.restoredChats.has(chat.chatId),
           undefined,
-          { chatId: chat.chatId, restore: this.restoredChats.has(chat.chatId) },
+          {
+            chatId: chat.chatId,
+            restore: this.restoredChats.has(chat.chatId),
+            ...(cwd ? { cwd } : {}),
+          },
+          (query) => this.mentionPaths(cwd, query),
         );
         this.agentPanes.set(chat.chatId, pane);
         pane.store.subscribe((state, prevState) => {
@@ -587,9 +648,10 @@ export class ChatGrid {
     cell.el.dataset.active = String(active);
     cell.el.setAttribute("aria-label", uiText.chatCell(chat.title, token.labelEn));
     // Exact 2px Hilo state border from DESIGN_SYSTEM.md §2
-    cell.el.style.border = `2px solid ${token.darkBorder}`;
-    cell.el.style.backgroundColor = token.darkBg;
-    cell.el.style.color = token.darkText;
+    const isLight = cell.el.ownerDocument.documentElement.dataset.theme === "light";
+    cell.el.style.border = `2px solid ${isLight ? token.lightBorder : token.darkBorder}`;
+    cell.el.style.backgroundColor = isLight ? token.lightBg : token.darkBg;
+    cell.el.style.color = isLight ? token.lightText : token.darkText;
     const headerText = uiText.chatCellHeader(token.icon, chat.title, chat.modelName, token.labelEn);
     // The title is just the session's name ("New session #8"); the model and the validation
     // state stay available as its tooltip.
@@ -608,11 +670,157 @@ export class ChatGrid {
       delete cell.titleStatusDot.dataset.status;
       cell.titleStatusDot.innerHTML = "";
     }
-    this.messageRenderer.renderInto(cell.messages, z3.messagesByChatId[chat.chatId] ?? [], 0, 400);
+    const messages = z3.messagesByChatId[chat.chatId] ?? [];
+    if (!chat.agentId && this.nativeChat) {
+      const pane = this.nativePanes.get(chat.chatId) ?? this.createNativePane(chat.chatId);
+      if (pane.wrapper.parentElement !== cell.el) cell.el.append(pane.wrapper);
+      if (cell.messages.parentElement !== pane.wrapper) pane.wrapper.prepend(cell.messages);
+      this.renderNativeMessages(cell.messages, messages);
+      this.updateNativeComposer(chat.chatId);
+    } else {
+      this.messageRenderer.renderInto(cell.messages, messages, 0, 400);
+    }
     const logs = z3.terminalLogsByChatId[chat.chatId] ?? [];
     cell.logs.dataset.logCount = String(logs.length);
     cell.logs.textContent = logs.slice(-5).join("\n");
     return cell.el;
+  }
+
+  private readonly renderedNativeMessages = new WeakMap<
+    HTMLElement,
+    readonly CockpitChatMessage[]
+  >();
+
+  private renderNativeMessages(
+    container: HTMLElement,
+    messages: readonly CockpitChatMessage[],
+  ): void {
+    if (this.renderedNativeMessages.get(container) === messages) return;
+    this.renderedNativeMessages.set(container, messages);
+    container.classList.add("hilo-agent-output");
+    container.setAttribute("role", "log");
+    container.setAttribute("aria-live", "polite");
+    container.replaceChildren(
+      ...messages.map((message) => {
+        const article = container.ownerDocument.createElement("article");
+        renderChatMessage(article, message.role, message.content, message.renderedHtmlBlocks);
+        return article;
+      }),
+    );
+    container.scrollTop = container.scrollHeight;
+  }
+
+  private createNativePane(chatId: string) {
+    const doc = this.grid.ownerDocument;
+    const wrapper = doc.createElement("div");
+    wrapper.className = "hilo-agent-panel hilo-native-chat-composer";
+    const status = doc.createElement("p");
+    status.className = "hilo-agent-status";
+    status.setAttribute("role", "status");
+    status.hidden = true;
+    const composer = new ChatComposer(
+      doc,
+      (text) => void this.sendNativePrompt(chatId, text),
+      () => this.cancelNativePrompt(chatId),
+      (query) => this.mentionPaths(this.stores.navigation.getState().projectPath, query),
+    );
+    wrapper.append(status, composer.element);
+    const pane = { wrapper, status, composer, requestId: undefined };
+    this.nativePanes.set(chatId, pane);
+    return pane;
+  }
+
+  private updateNativeComposer(chatId: string): void {
+    const pane = this.nativePanes.get(chatId);
+    if (!pane) return;
+    pane.composer.update({
+      started: Boolean(this.stores.zone3.getState().messagesByChatId[chatId]?.length),
+      busy: Boolean(pane.requestId),
+      canCancel: Boolean(pane.requestId),
+      pendingLabel: "",
+    });
+  }
+
+  private async sendNativePrompt(chatId: string, text: string): Promise<void> {
+    const pane = this.nativePanes.get(chatId);
+    const host = this.nativeChat;
+    if (!host || !pane || pane.requestId) return;
+    const requestId = crypto.randomUUID();
+    pane.requestId = requestId;
+    pane.status.hidden = true;
+    this.appendNativeMessage(chatId, "user", text);
+    pane.composer.clearSent(text);
+    this.updateNativeComposer(chatId);
+    const history = (this.stores.zone3.getState().messagesByChatId[chatId] ?? [])
+      .filter(
+        (item): item is typeof item & { role: "user" | "assistant" } => item.role !== "system",
+      )
+      .slice(-12)
+      .map(({ role, content }, index, items) => ({
+        role,
+        content: index === items.length - 1 ? content : content.slice(-4000),
+      }));
+    try {
+      const reply = await host.send(requestId, history);
+      if (pane.requestId === requestId && reply)
+        this.appendNativeMessage(chatId, "assistant", reply);
+    } catch (error) {
+      if (pane.requestId === requestId) {
+        pane.status.textContent = String(error);
+        pane.status.hidden = false;
+      }
+    } finally {
+      if (pane.requestId === requestId) {
+        pane.requestId = undefined;
+        this.updateNativeComposer(chatId);
+      }
+    }
+  }
+
+  private appendNativeMessage(chatId: string, role: "user" | "assistant", content: string): void {
+    const message = {
+      chatId,
+      messageId: crypto.randomUUID(),
+      role,
+      content,
+      streaming: false,
+      renderedHtmlBlocks: new IncrementalMarkdownCache().update(content),
+    };
+    this.stores.zone3.setState((state) => ({
+      ...state,
+      messagesByChatId: {
+        ...state.messagesByChatId,
+        [chatId]: [...(state.messagesByChatId[chatId] ?? []), message],
+      },
+    }));
+  }
+
+  private cancelNativePrompt(chatId: string): void {
+    const pane = this.nativePanes.get(chatId);
+    if (!pane?.requestId) return;
+    const requestId = pane.requestId;
+    pane.requestId = undefined;
+    this.updateNativeComposer(chatId);
+    void this.nativeChat?.cancel(requestId).catch(() => undefined);
+  }
+
+  private removeNativePane(chatId: string): void {
+    this.cancelNativePrompt(chatId);
+    this.nativePanes.get(chatId)?.composer.destroy();
+    this.nativePanes.delete(chatId);
+  }
+
+  private mentionPaths(cwd: string, query: string): readonly string[] {
+    if (cwd !== this.stores.navigation.getState().projectPath) return [];
+    const needle = query.toLowerCase();
+    const matches: string[] = [];
+    for (const file of this.stores.zone2.getState().fileTree) {
+      if (!file.isDirectory && file.path.toLowerCase().includes(needle)) {
+        matches.push(file.path);
+        if (matches.length === 12) break;
+      }
+    }
+    return matches;
   }
 
   private openAgent(agent: InstalledAgent): void {

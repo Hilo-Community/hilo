@@ -6,7 +6,7 @@ import { type ThinScrollbar, attachThinScrollbar } from "../../ui/thin-scrollbar
 import { UI_STRINGS, uiText } from "../../ui/ui-strings.js";
 import { askUnsavedChoice } from "../dialogs/unsaved-dialog.js";
 import { type HeaderTabSpec, HeaderTabs } from "../panels/header-tabs.js";
-import { TREE_HIDE_ICON, TREE_SHOW_ICON } from "../panels/panel-icons.js";
+import { TREE_SHOW_ICON } from "../panels/panel-icons.js";
 import { FileTreePanel } from "./file-tree-panel.js";
 
 export interface InspectorOptions {
@@ -85,7 +85,7 @@ export class Inspector {
 
     this.element = doc.createElement("section");
     this.element.className =
-      "hilo-zone-4-inspector bg-main border border-white/8 rounded-tr-[16px] rounded-br-[16px] flex flex-col h-full overflow-hidden";
+      "hilo-zone-4-inspector bg-main border border-divider rounded-tr-[16px] rounded-br-[16px] flex flex-col h-full overflow-hidden";
     this.element.setAttribute("aria-label", UI_STRINGS.shell.inspector);
     this.element.style.minWidth = "0";
     this.element.style.overflow = "hidden";
@@ -142,6 +142,7 @@ export class Inspector {
       onScroll: options.onTreeScroll,
       headerAction: { run: () => this.toggleTree() },
     });
+    if (this.tree.actionButton) this.tree.actionButton.innerHTML = TREE_SHOW_ICON;
 
     // The edge strip that brings a hidden tree back: hovering it slides the tree in, clicking
     // it keeps the tree visible.
@@ -195,7 +196,6 @@ export class Inspector {
     const action = this.tree.actionButton;
     if (action) {
       const label = treeHidden ? UI_STRINGS.files.pinTree : UI_STRINGS.files.hideTree;
-      action.innerHTML = treeHidden ? TREE_SHOW_ICON : TREE_HIDE_ICON;
       action.setAttribute("aria-label", label);
       action.title = label;
     }

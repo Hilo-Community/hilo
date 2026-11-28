@@ -61,7 +61,7 @@ pub struct TaskWorktree {
 impl CheckpointManager {
     /// Materializes the latest checkpoint of `task_id` into a fresh worktree.
     pub fn provision_worktree(&self, task_id: &str) -> Result<TaskWorktree, CheckpointError> {
-        self.provision_worktree_with_mode(task_id, true)
+        self.provision_worktree_with_mode(task_id, task_id, true)
     }
 
     /// Materializes the latest checkpoint of `task_id` into a fresh worktree by Copy-on-Write when
@@ -71,9 +71,18 @@ impl CheckpointManager {
         &self,
         task_id: &str,
     ) -> Result<TaskWorktree, CheckpointError> {
-        match self.provision_worktree_with_mode(task_id, true) {
+        self.provision_worktree_slot(task_id, task_id)
+    }
+
+    /// Materializes a fresh task checkpoint at a stable location held exclusively by the caller.
+    pub fn provision_worktree_slot(
+        &self,
+        task_id: &str,
+        slot: &str,
+    ) -> Result<TaskWorktree, CheckpointError> {
+        match self.provision_worktree_with_mode(task_id, slot, true) {
             Err(CheckpointError::CowUnavailable { .. }) => {
-                self.provision_worktree_with_mode(task_id, false)
+                self.provision_worktree_with_mode(task_id, slot, false)
             }
             other => other,
         }
@@ -82,9 +91,11 @@ impl CheckpointManager {
     fn provision_worktree_with_mode(
         &self,
         task_id: &str,
+        slot: &str,
         allow_cow: bool,
     ) -> Result<TaskWorktree, CheckpointError> {
         validate_task_id(task_id)?;
+        validate_task_id(slot)?;
         let started = Instant::now();
         let repo = self.lock();
         let latest =
@@ -93,7 +104,7 @@ impl CheckpointManager {
                 .ok_or_else(|| CheckpointError::NoCheckpoint {
                     task_id: task_id.to_string(),
                 })?;
-        let path = self.worktree_path(task_id)?;
+        let path = self.worktree_path(slot)?;
         fs::create_dir_all(path.parent().unwrap_or(&path))
             .map_err(|source| io_error(&path, source))?;
         // `create_dir`, not `create_dir_all`: an existing worktree is an error, never reused.

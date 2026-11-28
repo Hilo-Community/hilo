@@ -91,6 +91,17 @@ impl ModelRegistry {
         .expect("built-in registry is valid")
     }
 
+    pub fn local_chat() -> Self {
+        let mut entry = ollama(
+            "qwen2.5-coder:1.5b",
+            "Qwen2.5-Coder 1.5B (local chat)",
+            2 * GIB,
+            32_768,
+        );
+        entry.capabilities.max_output_tokens = 2_048;
+        Self::new(vec![entry]).expect("built-in chat registry is valid")
+    }
+
     pub fn entries(&self) -> &[ModelEntry] {
         &self.entries
     }

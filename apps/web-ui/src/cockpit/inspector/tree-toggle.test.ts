@@ -39,6 +39,8 @@ function mount() {
 describe("file tree hide / show", () => {
   it("starts visible, hides from its own button and comes back from the edge strip", () => {
     const { body, action, edge } = mount();
+    const arrow = action().querySelector("svg");
+    expect(arrow?.innerHTML).toBe(edge().querySelector("svg")?.innerHTML);
     expect(body().dataset.treeHidden).toBe("false");
     expect(edge().hidden).toBe(true);
     expect(action().getAttribute("aria-label")).toBe("Hide file tree");
@@ -48,6 +50,7 @@ describe("file tree hide / show", () => {
     expect(edge().hidden).toBe(false);
     // Hidden, the same button in the sliding tree keeps it visible instead.
     expect(action().getAttribute("aria-label")).toBe("Keep file tree visible");
+    expect(action().querySelector("svg")).toBe(arrow);
 
     edge().click();
     expect(body().dataset.treeHidden).toBe("false");

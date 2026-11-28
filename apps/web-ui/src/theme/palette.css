@@ -1,0 +1,103 @@
+@theme static {
+  --font-terminal: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
+  --color-exterior: #000000;
+  --color-main: #141414;
+  --color-sidebar: var(--color-main);
+  --color-nav-rail: #323231;
+  --color-topbar: #323231;
+  /* Controls and dividers drawn on the backdrop (title bar and icon rail), not inside a panel. */
+  --color-backdrop-control: #444443;
+  --color-backdrop-divider: #4a4a49;
+  --color-selected: #323231;
+  --color-button: #252525;
+  --color-card: #1c1c1b;
+  --color-composer: #1f1f1f;
+  --color-status-inactive: #414141;
+  --color-sidebar-divider: #323231;
+  --color-sidebar-highlight: #4cafff;
+  --color-input-border: #303030;
+  --color-pill-border: #343434;
+  --color-button-border: #373736;
+  --color-divider: #282827;
+  --color-text-primary: #f5f5f5;
+  --color-content-text: var(--color-text-primary);
+  --color-text-secondary: #bcbcbc;
+  --color-text-placeholder: #a4a4a4;
+  --color-text-muted: #a1a1a1;
+  --color-control-muted: #7f7f7e;
+  --color-text-inverse: #191919;
+}
+
+/* Shared treatments for dividers and translucent surfaces in the default appearance. */
+:root {
+  --color-overlay-subtle: rgba(255, 255, 255, 0.05);
+  --color-overlay-soft: rgba(255, 255, 255, 0.06);
+  --color-overlay-medium: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"],
+[data-theme="light"] {
+  --color-overlay-subtle: rgba(0, 0, 0, 0.04);
+  --color-overlay-soft: rgba(0, 0, 0, 0.05);
+  --color-overlay-medium: rgba(0, 0, 0, 0.07);
+
+  --color-exterior: #ffffff;
+  --color-main: #ffffff;
+  --color-sidebar: #ffffff;
+  --color-nav-rail: #e8e7e7;
+  --color-topbar: #e8e7e7;
+  --color-backdrop-control: #ffffff;
+  --color-backdrop-divider: #d4d3d2;
+  --color-selected: #e8e8e5;
+  --color-button: #ededea;
+  --color-card: #f3f3f1;
+  --color-composer: #fafaf9;
+  --color-status-inactive: #b7b7b2;
+  --color-sidebar-divider: #e5e5e1;
+  --color-sidebar-highlight: #1765ad;
+  --color-input-border: #ddddd9;
+  --color-pill-border: #ddddd9;
+  --color-button-border: #ddddd9;
+  --color-divider: #ddddd9;
+  --color-text-primary: #242422;
+  --color-content-text: var(--color-text-primary);
+  --color-text-secondary: #555551;
+  --color-text-placeholder: #92928d;
+  --color-text-muted: #777773;
+  --color-control-muted: #b7b7b2;
+  --color-text-inverse: #ffffff;
+}
+
+/* Tool surfaces and semantic accents are defined here for both appearances. */
+:root {
+  --agent-card-tint: white;
+  --agent-card-shade: black;
+  --agent-done: #7bc49a;
+  --agent-failed: #e39a9e;
+  --agent-waiting: #d4b06e;
+  --agent-focus: #93c5fd;
+  --agent-diff-add-fill: #20362a;
+  --agent-diff-remove-fill: #3b1b25;
+  --agent-code-comment: #999b9b;
+  --agent-code-keyword: #7cd3d3;
+  --agent-code-string: #dfa3df;
+  --agent-code-number: #e5c279;
+  --agent-code-function: #e9ad79;
+  --agent-code-meta: #afcf72;
+}
+:root[data-theme="light"],
+[data-theme="light"] {
+  --agent-card-tint: black;
+  --agent-card-shade: white;
+  --agent-done: #287a49;
+  --agent-failed: #af3c47;
+  --agent-waiting: #86621f;
+  --agent-focus: #2868b2;
+  --agent-diff-add-fill: #e6f1e9;
+  --agent-diff-remove-fill: #f8e7eb;
+  --agent-code-comment: #727373;
+  --agent-code-keyword: #176e75;
+  --agent-code-string: #8d3c89;
+  --agent-code-number: #946218;
+  --agent-code-function: #8d481b;
+  --agent-code-meta: #55721c;
+}

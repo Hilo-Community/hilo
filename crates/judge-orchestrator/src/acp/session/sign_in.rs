@@ -110,20 +110,16 @@ impl Session {
         Ok(())
     }
 
-    pub(super) fn reconnect(
-        &mut self,
-    ) -> Result<Receiver<Result<Option<Value>, AcpError>>, AcpError> {
+    pub(super) fn reconnect(&mut self) -> Result<(), AcpError> {
         if let Some(previous) = self.executor.agent.lock().expect("agent lock").take() {
             previous.lock().expect("child lock").kill();
         }
         let spawned = spawn_agent(&self.host, &self.base_spec, "launch-after-login")?;
-        self.input = spawned.input;
+        self.connection = spawned.connection;
         *self.executor.agent.lock().expect("agent lock") = Some(spawned.child);
         self.restart_readers.extend(spawned.readers);
-        self.outgoing.clear();
-        self.next_id = 0;
         self.seen.clear();
-        Ok(spawned.messages)
+        Ok(())
     }
 
     /// The user picked a sign-in method: it must be one the agent advertised, and not a Host
@@ -206,13 +202,6 @@ impl Session {
             return Err(bad("elicitation request limit or duplicate id"));
         }
         let params = &message["params"];
-        let in_session = self.session_id.is_some() && params["sessionId"] == json!(self.session_id);
-        let in_auth = params["requestId"]
-            .as_u64()
-            .is_some_and(|id| self.outgoing.get(&id).is_some_and(|m| m == "authenticate"));
-        if !in_session && !in_auth {
-            return Err(bad("elicitation has no active request or session"));
-        }
         if params["mode"] != "url" {
             return self.reply(&message, Err("Unsupported elicitation mode".into()));
         }
@@ -239,6 +228,7 @@ impl Session {
             .filter(|text| text.len() <= MAX_TEXT_BYTES)
             .ok_or_else(|| bad("invalid elicitation message"))?
             .to_owned();
+        self.connection.bind_elicitation(&elicitation_id)?;
         self.elicitation_urls
             .lock()
             .expect("elicitation lock")

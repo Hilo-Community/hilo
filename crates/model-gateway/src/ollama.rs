@@ -3,7 +3,7 @@
 //! The client ignores `HTTP(S)_PROXY` and follows no redirect, so a request for a local model
 //! cannot be routed off the machine by the environment or by the server answering.
 use crate::{
-    gateway::{BackendOutput, BoxFuture, CompletionRequest, ModelBackend},
+    gateway::{BackendOutput, BoxFuture, ChatRequest, CompletionRequest, ModelBackend},
     registry::ModelEntry,
 };
 use serde_json::{json, Value};
@@ -32,6 +32,38 @@ impl OllamaBackend {
         Self {
             client: client(timeout),
         }
+    }
+    async fn request(
+        &self,
+        entry: &ModelEntry,
+        path: &str,
+        body: Value,
+        text_pointer: &str,
+    ) -> Result<BackendOutput, String> {
+        let response = self
+            .client
+            .post(format!("{}{path}", entry.endpoint.trim_end_matches('/')))
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|_| "Ollama is not running".to_string())?;
+        let value = read_json(response).await?;
+        let count = |key: &str| {
+            value[key]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0)
+        };
+        Ok(BackendOutput {
+            text: value
+                .pointer(text_pointer)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            input_tokens: count("prompt_eval_count"),
+            output_tokens: count("eval_count"),
+        })
     }
 }
 
@@ -80,29 +112,26 @@ impl ModelBackend for OllamaBackend {
                     "stop": request.stop,
                 },
             });
-            let response = self
-                .client
-                .post(format!(
-                    "{}/api/generate",
-                    entry.endpoint.trim_end_matches('/')
-                ))
-                .header("content-type", "application/json")
-                .body(body.to_string())
-                .send()
+            self.request(entry, "/api/generate", body, "/response")
                 .await
-                .map_err(|_| "Ollama is not running".to_string())?;
-            let value = read_json(response).await?;
-            let count = |key: &str| {
-                value[key]
-                    .as_u64()
-                    .and_then(|n| u32::try_from(n).ok())
-                    .unwrap_or(0)
-            };
-            Ok(BackendOutput {
-                text: value["response"].as_str().unwrap_or_default().to_owned(),
-                input_tokens: count("prompt_eval_count"),
-                output_tokens: count("eval_count"),
-            })
+        })
+    }
+
+    fn chat<'a>(
+        &'a self,
+        entry: &'a ModelEntry,
+        request: &'a ChatRequest,
+    ) -> BoxFuture<'a, Result<BackendOutput, String>> {
+        Box::pin(async move {
+            let body = json!({
+                "model": entry.model_name,
+                "messages": request.messages,
+                "stream": false,
+                "keep_alive": KEEP_ALIVE,
+                "options": { "num_predict": request.max_output_tokens },
+            });
+            self.request(entry, "/api/chat", body, "/message/content")
+                .await
         })
     }
 }

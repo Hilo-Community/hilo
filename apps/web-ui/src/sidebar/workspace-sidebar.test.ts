@@ -89,6 +89,7 @@ describe("Workspace sidebar", () => {
       expect(notice?.hidden).toBe(false);
       expect(notice?.textContent).toContain("No room for another panel");
       expect(notice?.getAttribute("role")).toBe("status");
+      expect(notice?.querySelector("button")).toBeNull();
       expect(root.contains(notice)).toBe(false);
       expect(root.querySelector<HTMLElement>(".sidebar-error")?.hidden).toBe(true);
       expect(stores.zone3.getState().chats).toHaveLength(2);
@@ -102,9 +103,7 @@ describe("Workspace sidebar", () => {
       vi.advanceTimersByTime(1000);
       expect(notice?.hidden).toBe(true);
 
-      attempt();
-      notice?.querySelector<HTMLButtonElement>("button")?.click();
-      expect(notice?.hidden).toBe(true);
+      // Only the sidebar's once-a-minute "23 minutes ago" refresh is left.
       expect(vi.getTimerCount()).toBe(1);
     },
   );
@@ -117,6 +116,40 @@ describe("Workspace sidebar", () => {
     sidebar.destroy();
     expect(document.querySelector(".hilo-toast")).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("shows how long ago a session was active under its title, and keeps it current", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-28T10:00:00Z"));
+    const { stores, get } = setup();
+    const subtitle = (id: string) =>
+      get(`button[data-chat-id="${id}"]`).querySelector(".sidebar-row-subtitle")?.textContent;
+    // Sessions restored without a recorded time count from when the app loaded.
+    expect(subtitle("a")).toBe("just now");
+    const id = stores.createChat() ?? "";
+    expect(subtitle(id)).toBe("just now");
+    vi.advanceTimersByTime(23 * 60_000);
+    expect(subtitle(id)).toBe("23 minutes ago");
+    stores.setChatStatusBadge(id, "running");
+    expect(subtitle(id)).toBe("just now");
+  });
+
+  it("shows a picked session alone and its whole group again when the group is picked", () => {
+    const { stores, get } = setup();
+    const alone = () => stores.navigation.getState().groups[0]?.maximizedChatId ?? null;
+    get('button[data-chat-id="b"]').click();
+    expect(alone()).toBe("b");
+    expect(stores.zone3.getState().activeChatId).toBe("b");
+    get('button[data-chat-id="a"]').click();
+    expect(alone()).toBe("a");
+    // Picking the session shown alone again goes back to the group.
+    get('button[data-chat-id="a"]').click();
+    expect(alone()).toBeNull();
+    get('button[data-chat-id="a"]').click();
+    expect(alone()).toBe("a");
+    get(".sidebar-row--group .sidebar-row-select").click();
+    expect(alone()).toBeNull();
+    expect(stores.zone3.getState().activeChatId).toBe("a");
   });
 
   it("preserves row nodes and focus through selection, collapse, rename and adding another group", () => {

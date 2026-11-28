@@ -1,5 +1,9 @@
-import { type MergeLayout, MergeReviewView } from "@hilo/editor-cm6";
-import { HILO_STATE_META } from "@hilo/protocol-types";
+import {
+  HILO_STATE_VISUAL_TOKENS,
+  type HiloStateVisualTokens,
+  type MergeLayout,
+  MergeReviewView,
+} from "@hilo/editor-cm6";
 import { JUDGE_STRINGS } from "./strings.js";
 import type { AcceptResponse, JudgeReview, ReviewPreview } from "./types.js";
 
@@ -51,10 +55,11 @@ export class JudgeReviewPanel {
     this.element.setAttribute("aria-label", JUDGE_STRINGS.panel);
 
     const header = this.el("header", "hilo-judge-review-header");
-    const meta = HILO_STATE_META[review.verdict];
+    const meta = HILO_STATE_VISUAL_TOKENS[review.verdict];
     const badge = this.el("span", "hilo-judge-badge", meta.labelEn);
     badge.dataset.state = review.verdict;
     badge.title = meta.labelEn;
+    applyStateColors(badge, meta.dark);
     const attempts = this.el("span", "hilo-judge-meta", JUDGE_STRINGS.attempts(review.attempts));
     const close = this.button("hilo-judge-close", "×", () => this.actions.close());
     close.setAttribute("aria-label", JUDGE_STRINGS.close);
@@ -77,6 +82,7 @@ export class JudgeReviewPanel {
         `${JUDGE_STRINGS.steps[step.kind]} — ${step.passed ? JUDGE_STRINGS.passed : JUDGE_STRINGS.failed} (${step.durationMs} ms)`,
       );
       item.dataset.passed = String(step.passed);
+      if (!step.passed) item.style.color = HILO_STATE_VISUAL_TOKENS.FailedRed.dark.text;
       steps.append(item);
     }
     this.element.append(steps);
@@ -119,6 +125,7 @@ export class JudgeReviewPanel {
 
     this.conflictNotice = this.el("p", "hilo-judge-conflict", JUDGE_STRINGS.conflict);
     this.conflictNotice.hidden = true;
+    applyStateColors(this.conflictNotice, HILO_STATE_VISUAL_TOKENS.StaleOrange.dark);
     this.conflictNotice.setAttribute("role", "alert");
     this.element.append(this.conflictNotice);
 
@@ -134,6 +141,10 @@ export class JudgeReviewPanel {
     this.acceptButton = this.button("hilo-judge-accept", JUDGE_STRINGS.accept, () => {
       void this.acceptSelected();
     });
+    this.acceptButton.style.setProperty(
+      "--judge-accept-border",
+      HILO_STATE_VISUAL_TOKENS.ValidatedGreen.dark.border,
+    );
     this.rejectButton = this.button("hilo-judge-reject", JUDGE_STRINGS.reject, () => {
       void this.run(() => this.actions.reject());
     });
@@ -310,4 +321,10 @@ export class JudgeReviewPanel {
     button.addEventListener("click", onClick);
     return button;
   }
+}
+
+function applyStateColors(element: HTMLElement, colors: HiloStateVisualTokens["dark"]): void {
+  element.style.setProperty("--judge-state-bg", colors.background);
+  element.style.setProperty("--judge-state-border", colors.border);
+  element.style.setProperty("--judge-state-text", colors.text);
 }

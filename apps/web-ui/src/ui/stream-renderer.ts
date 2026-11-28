@@ -1,6 +1,23 @@
 import type { CockpitChatMessage, Zone3MultiChatState } from "../stores/index.js";
 import type { AtomicStore } from "../stores/index.js";
+import { enhanceCodeBlocks } from "./code-blocks.js";
 import { renderMarkdownBlock } from "./markdown.js";
+
+/** Use sanitized Markdown blocks when available, and otherwise display the raw text. */
+export function renderChatMessage(
+  article: HTMLElement,
+  role: string,
+  text: string,
+  html: readonly string[],
+): void {
+  article.dataset.role = role;
+  article.setAttribute("aria-label", role);
+  article.classList.add("hilo-markdown", "prose", "max-w-none");
+  if (html.length) {
+    article.innerHTML = html.join("\n");
+    enhanceCodeBlocks(article);
+  } else article.textContent = text;
+}
 
 const renderMarkdownBlockToHtml = renderMarkdownBlock;
 

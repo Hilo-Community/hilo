@@ -1,12 +1,12 @@
 import type { AgentStore } from "./store.js";
 import { type AgentTranscripts, parseTranscript, serializeTranscript } from "./transcript.js";
 
-/** Wait this long after the last change before saving, so streaming is not written chunk by chunk. */
+/** Coalesce streaming changes into at most one scheduled write at a time. */
 const SAVE_DELAY_MS = 600;
 
 /**
  * Keeps one panel's conversation on disk: loads it when the panel comes back from a previous run,
- * saves it as it changes, and deletes it when the panel is closed for good. What is saved is
+ * saves it as it changes, and deletes it when the chat is deleted. What is saved is
  * always what the panel shows, so emptying the panel empties the file.
  */
 export class TranscriptKeeper {
@@ -15,6 +15,10 @@ export class TranscriptKeeper {
   private onDisk = false;
   private wasBusy = false;
   private done = false;
+  private writes = Promise.resolve();
+  private restoring: Promise<void> | undefined;
+  private draft = "";
+  private draftEdited = false;
   constructor(
     private readonly store: AgentStore,
     private readonly transcripts: AgentTranscripts,
@@ -23,50 +27,74 @@ export class TranscriptKeeper {
   ) {}
 
   /** Show the conversation of the previous run, unless the panel already has one. */
-  restore(): void {
-    void this.transcripts
+  restore(showDraft: (text: string) => void): Promise<void> {
+    this.restoring = this.transcripts
       .load(this.chatId)
       .then((json) => {
         if (this.done || !json || this.store.getState().timeline.length > 0) return;
         const snapshot = parseTranscript(json, this.agentId);
         if (!snapshot) return;
-        this.store.restore(snapshot);
         this.onDisk = true;
         this.saved = json;
+        if (!this.draftEdited && snapshot.draft) {
+          this.draft = snapshot.draft;
+          showDraft(this.draft);
+        }
+        this.store.restore(snapshot);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        this.restoring = undefined;
+        this.changed();
+      });
+    return this.restoring;
+  }
+
+  changeDraft(text: string): void {
+    if (this.draft === text) return;
+    this.draft = text;
+    this.draftEdited = true;
+    this.changed();
   }
 
   /** The panel's state changed: save soon, or at once when a turn has just ended. */
   changed(): void {
-    if (this.done) return;
+    if (this.done || this.restoring) return;
     const state = this.store.getState();
-    if (state.timeline.length === 0) {
+    if (!this.draft && !state.timeline.length && !state.sessionId && !state.savedOptions?.length) {
       clearTimeout(this.timer);
+      this.timer = undefined;
       if (this.onDisk) this.erase();
       return;
     }
     const turnEnded = this.wasBusy && !state.busy;
     this.wasBusy = state.busy;
-    clearTimeout(this.timer);
     if (turnEnded) this.flush();
-    else this.timer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
+    else if (!this.timer) this.timer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
   }
 
   /** Save now what has not been saved yet. */
-  flush(): void {
+  flush(): Promise<void> {
     clearTimeout(this.timer);
-    if (this.done) return;
-    const json = serializeTranscript(this.store.getState(), this.agentId);
-    if (!json || json === this.saved) return;
+    this.timer = undefined;
+    if (this.done) return this.writes;
+    if (this.restoring) return this.restoring.then(() => this.flush());
+    const json = serializeTranscript(this.store.getState(), this.agentId, this.draft);
+    if (!json || json === this.saved) return this.writes;
     this.saved = json;
     this.onDisk = true;
-    void this.transcripts.save(this.chatId, json).catch(() => undefined);
+    this.writes = this.writes
+      .then(() => this.transcripts.save(this.chatId, json))
+      .catch(() => {
+        if (this.saved === json) this.saved = "";
+      });
+    return this.writes;
   }
 
-  /** The panel was closed: its conversation goes with it, and nothing is written again. */
+  /** The chat was deleted: remove its conversation after any pending writes. */
   discard(): void {
     clearTimeout(this.timer);
+    this.timer = undefined;
     this.done = true;
     this.erase();
   }
@@ -74,6 +102,8 @@ export class TranscriptKeeper {
   private erase(): void {
     this.onDisk = false;
     this.saved = "";
-    void this.transcripts.remove(this.chatId).catch(() => undefined);
+    this.writes = this.writes
+      .then(() => this.transcripts.remove(this.chatId))
+      .catch(() => undefined);
   }
 }

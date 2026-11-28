@@ -1,7 +1,9 @@
 import { browserStorage } from "../state/ui-preferences.js";
+import type { UiPreferences } from "../state/ui-preferences.js";
 import { type ThinScrollbar, attachThinScrollbar } from "../ui/thin-scrollbar.js";
 import { AgentRegistryPanel } from "./agent-registry-panel.js";
 import type { AgentRegistryHost } from "./agent-registry.js";
+import { AppearancePanel } from "./appearance-panel.js";
 import { type InlineCompletionHost, InlineCompletionPanel } from "./inline-completion-panel.js";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settings-content.js";
 
@@ -24,12 +26,14 @@ export class SettingsPage {
   private readonly expanded = new Set<SettingsSectionId>();
   private panel: AgentRegistryPanel | null = null;
   private completionPanel: InlineCompletionPanel | null = null;
+  private appearancePanel: AppearancePanel | null = null;
 
   constructor(
     private readonly doc: Document,
     private readonly options: {
       agentRegistry: AgentRegistryHost;
       inlineCompletion?: InlineCompletionHost;
+      preferences?: UiPreferences;
     },
   ) {
     try {
@@ -111,6 +115,8 @@ export class SettingsPage {
     this.panel = null;
     this.completionPanel?.destroy();
     this.completionPanel = null;
+    this.appearancePanel?.destroy();
+    this.appearancePanel = null;
     this.element.remove();
   }
 
@@ -176,6 +182,11 @@ export class SettingsPage {
           if (!host) continue;
           this.completionPanel ??= new InlineCompletionPanel(this.doc, host);
           group.append(this.completionPanel.element);
+        } else if (section.id === "appearance") {
+          const preferences = this.options.preferences;
+          if (!preferences) continue;
+          this.appearancePanel ??= new AppearancePanel(this.doc, preferences);
+          group.append(this.appearancePanel.element);
         } else {
           this.panel ??= new AgentRegistryPanel(this.doc, this.options.agentRegistry);
           group.append(this.panel.element);

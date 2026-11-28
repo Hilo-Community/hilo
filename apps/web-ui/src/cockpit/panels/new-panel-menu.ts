@@ -8,6 +8,7 @@ import { isMacPlatform } from "./panel-shortcuts.js";
 export interface NewPanelMenuActions {
   /** A plain shell panel; absent when the host offers no terminal. */
   readonly openTerminal?: () => void;
+  readonly openLocalChat?: () => void;
   readonly openAgentInterface: (agent: InstalledAgent) => void;
   readonly installAgents: () => void;
 }
@@ -129,6 +130,8 @@ export class NewPanelMenu {
         this.separator(),
       );
     }
+    if (actions.openLocalChat)
+      menu.append(this.item(text.localChat, actions.openLocalChat), this.separator());
     const heading = this.doc.createElement("div");
     heading.className = "hilo-new-panel-heading";
     heading.textContent = text.externalAgents;

@@ -9,18 +9,12 @@
     @apply border-r rounded-tr-[16px] rounded-br-[16px];
   }
 
-  .hilo-zone-2-sidebar,
-  .hilo-zone-3-multichat,
-  .hilo-zone-4-inspector {
-    border-color: rgba(255, 255, 255, 0.045) !important;
-  }
-
   .hilo-group-empty {
     @apply flex items-center justify-center h-full text-center text-[13px] text-text-muted p-6;
   }
 
   .hilo-zone-3-multichat {
-    @apply bg-main border-t border-b border-l border-white/8 flex flex-col h-full;
+    @apply bg-main border-t border-b border-l border-divider flex flex-col h-full;
   }
 
   .hilo-zone-3-grid {
@@ -75,8 +69,7 @@
   .hilo-layout-handle::after {
     content: "";
     position: absolute;
-    /* Same strength as the divider under each panel header (`border-white/8`). */
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--color-divider);
     transition: background 120ms ease;
   }
   .hilo-layout-split[data-direction="row"] > .hilo-layout-handle::after {
@@ -98,7 +91,7 @@
   .hilo-layout-handle:hover::after,
   .hilo-layout-handle:focus-visible::after,
   .hilo-zone-3-grid[data-resizing] .hilo-layout-handle:focus::after {
-    background: rgba(255, 255, 255, 0.4);
+    background: color-mix(in srgb, var(--agent-card-tint) 40%, transparent);
   }
   /* No text selection, and the resize cursor everywhere, while dragging. */
   .hilo-zone-3-grid[data-resizing] {
@@ -124,12 +117,13 @@
 
   .hilo-chat-cell-header,
   .hilo-chat-cell-badge {
-    @apply text-[12.5px] font-medium !text-text-primary border-b border-white/8;
+    @apply text-[12.5px] font-medium !text-text-primary border-b border-divider;
   }
 
   /* A panel's title is grey, and white while the panel is the selected one (like the tabs). */
   .hilo-chat-cell .hilo-chat-cell-header {
-    color: var(--color-text-muted) !important;
+    background: var(--color-main);
+    color: var(--color-text-secondary) !important;
     transition: color 120ms ease;
   }
   .hilo-chat-cell[data-active="true"] .hilo-chat-cell-header {
@@ -204,7 +198,7 @@
     width: 6px;
     height: 6px;
     border-radius: 999px;
-    background: var(--color-text-secondary);
+    background: var(--color-status-inactive);
   }
   .hilo-chat-cell-status-dot[data-status="waiting"] {
     background: var(--agent-waiting);
@@ -249,17 +243,14 @@
     border: 0;
     border-radius: 5px;
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--color-control-muted);
     cursor: pointer;
   }
-  .hilo-chat-cell-action:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.12);
-    color: var(--color-text-primary);
-  }
-  /* Pressed: the maximize button of a panel shown alone, and the ⋯ button while its menu is open. */
+  .hilo-chat-cell-action:hover:not(:disabled),
+  .hilo-chat-cell-action:focus-visible,
   .hilo-chat-cell-action[aria-pressed="true"],
   .hilo-chat-cell-action[aria-expanded="true"] {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .hilo-chat-cell-action:disabled {
@@ -279,15 +270,16 @@
   }
   .hilo-group-empty-add {
     padding: 2px 9px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--color-button-border);
     border-radius: 6px;
     background: transparent;
     color: var(--color-text-secondary);
     font-size: 12px;
     cursor: pointer;
   }
-  .hilo-group-empty-add:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.24);
+  .hilo-group-empty-add:hover:not(:disabled),
+  .hilo-group-empty-add:focus-visible {
+    background: var(--color-button);
     color: var(--color-text-primary);
   }
   .hilo-group-empty-add:disabled {
@@ -303,7 +295,7 @@
 
   .hilo-chat-cell-logs,
   .hilo-chat-cell-terminal {
-    @apply font-mono text-[11.5px] bg-composer border border-white/8 py-2 px-2.5 rounded-[8px] text-text-secondary select-text;
+    @apply font-mono text-[11.5px] bg-composer border border-input-border py-2 px-2.5 rounded-[8px] text-text-secondary select-text;
     margin: 0 12px 12px;
   }
 }

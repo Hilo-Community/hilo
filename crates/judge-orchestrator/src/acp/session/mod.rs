@@ -1,9 +1,11 @@
 //! One ACP agent session: the supervisor the Host drives, and the worker loop that speaks the
 //! protocol. Signing in lives in `sign_in`, tool calls and permissions in `tools`.
+mod connection;
 mod launch;
 mod sign_in;
 mod tools;
 
+use connection::{Connection, Incoming, IncomingPacket, SessionPacket, Transport};
 use launch::{sandbox_spec, spawn_agent, LaunchExecutor};
 
 use super::{
@@ -93,8 +95,12 @@ enum Control {
     ChooseAuth(String),
     TerminalInput(String),
     SetOption(String, String),
-    Prompt(String),
+    Prompt {
+        text: String,
+        previous_turns: Option<String>,
+    },
     Permission(String, bool),
+    PermissionOption(String, String),
     Elicitation(String, String),
     CancelTurn,
 }
@@ -109,8 +115,31 @@ pub struct AcpSessionSupervisor {
     elicitation_urls: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct AcpOptionPreference {
+    pub id: String,
+    pub value: String,
+}
+
 impl AcpSessionSupervisor {
-    pub fn start(mut host: AcpHost, launch: AcpLaunch) -> Result<Self, AcpError> {
+    pub fn start(host: AcpHost, launch: AcpLaunch) -> Result<Self, AcpError> {
+        Self::start_with_resume(host, launch, None)
+    }
+
+    pub fn start_with_resume(
+        host: AcpHost,
+        launch: AcpLaunch,
+        resume_session_id: Option<String>,
+    ) -> Result<Self, AcpError> {
+        Self::start_with_preferences(host, launch, resume_session_id, Vec::new())
+    }
+
+    pub fn start_with_preferences(
+        mut host: AcpHost,
+        launch: AcpLaunch,
+        resume_session_id: Option<String>,
+        preferred_options: Vec<AcpOptionPreference>,
+    ) -> Result<Self, AcpError> {
         host.gate
             .authorize(GatedCapability::WorkspaceLocalBinary)
             .map_err(|e| AcpError::Launch(e.to_string()))?;
@@ -156,7 +185,7 @@ impl AcpSessionSupervisor {
             let mut session = Session::new(
                 host,
                 worker_executor,
-                spawned.input,
+                spawned.connection,
                 SessionUi {
                     permissions: worker_permissions,
                     elicitation_urls: worker_urls,
@@ -165,7 +194,9 @@ impl AcpSessionSupervisor {
                 launch.credentials,
                 base_spec,
             );
-            let result = session.run(spawned.messages, control_rx);
+            session.resume_session_id = resume_session_id;
+            session.preferred_options = preferred_options.into_iter().take(8).collect();
+            let result = session.run(control_rx);
             session.finish(result);
             for reader in spawned.readers {
                 let _ = reader.join();
@@ -183,11 +214,27 @@ impl AcpSessionSupervisor {
     }
 
     pub fn prompt(&self, text: String) -> Result<(), AcpError> {
-        if text.is_empty() || text.len() > MAX_TEXT_BYTES {
+        self.prompt_with_history(text, None)
+    }
+
+    pub fn prompt_with_history(
+        &self,
+        text: String,
+        previous_turns: Option<String>,
+    ) -> Result<(), AcpError> {
+        if text.is_empty()
+            || text.len() > MAX_TEXT_BYTES
+            || previous_turns
+                .as_ref()
+                .is_some_and(|history| history.len() > 24 * 1024)
+        {
             return Err(bad("prompt size limit"));
         }
         self.controls
-            .try_send(Control::Prompt(text))
+            .try_send(Control::Prompt {
+                text,
+                previous_turns,
+            })
             .map_err(|_| bad("session closed or pending request limit"))
     }
     /// Trusted Host UI entry point: the user's pick for one of the options the agent offered.
@@ -233,6 +280,14 @@ impl AcpSessionSupervisor {
     pub fn answer_permission(&self, id: String, allow: bool) -> Result<(), AcpError> {
         self.controls
             .try_send(Control::Permission(id, allow))
+            .map_err(|_| bad("session closed or pending request limit"))
+    }
+    pub fn answer_permission_option(&self, id: String, option: String) -> Result<(), AcpError> {
+        if option.is_empty() || option.len() > 256 {
+            return Err(bad("invalid permission option"));
+        }
+        self.controls
+            .try_send(Control::PermissionOption(id, option))
             .map_err(|_| bad("session closed or pending request limit"))
     }
     pub fn elicitation_url(&self, id: &str) -> Option<String> {
@@ -326,13 +381,16 @@ struct Session {
     /// `mcpServers` entry for the relay, sent only if the agent said it speaks HTTP MCP.
     mcp_entry: Option<Value>,
     mcp_http: bool,
-    input: ChildInput,
+    connection: Connection,
     session_id: Option<String>,
+    resume_session_id: Option<String>,
+    session_resume: bool,
+    session_load: bool,
     /// What the agent offers for this session, and the picks sent but not yet answered.
     options: Vec<AgentOption>,
     pending_options: VecDeque<(String, String)>,
-    outgoing: BTreeMap<u64, String>,
-    next_id: u64,
+    preferred_options: VecDeque<AcpOptionPreference>,
+    preparing_session: bool,
     seen: BTreeSet<String>,
     pending: BTreeMap<String, Pending>,
     terminals: BTreeMap<String, (Value, ToolCall, Vec<crate::policy::SignedApproval>)>,
@@ -346,7 +404,7 @@ impl Session {
     fn new(
         mut host: AcpHost,
         executor: Arc<AgentToolExecutor>,
-        input: ChildInput,
+        connection: Connection,
         ui: SessionUi,
         credentials: AgentCredentials,
         base_spec: SandboxSpec,
@@ -390,12 +448,15 @@ impl Session {
             broker,
             mcp_entry,
             mcp_http: false,
-            input,
+            connection,
             session_id: None,
+            resume_session_id: None,
+            session_resume: false,
+            session_load: false,
             options: Vec::new(),
             pending_options: VecDeque::new(),
-            outgoing: BTreeMap::new(),
-            next_id: 0,
+            preferred_options: VecDeque::new(),
+            preparing_session: false,
             seen: BTreeSet::new(),
             pending: BTreeMap::new(),
             terminals: BTreeMap::new(),
@@ -431,10 +492,16 @@ impl Session {
         } else {
             TaskState::Cancelled
         };
+        // Ending between turns is ordinary (the chat reconnects on its next message); ending in
+        // the middle of one, or with an error, is a failure the user must see.
+        let interrupted = self.prompt_active && !cancelled;
+        let failed = result.is_err() || interrupted;
         let reason = result.err().map_or_else(
             || {
                 if cancelled {
                     "Session stopped".into()
+                } else if interrupted {
+                    "The agent exited during the turn".into()
                 } else {
                     "Agent exited".into()
                 }
@@ -450,35 +517,17 @@ impl Session {
                 reason: format!("Lifecycle requires recovery: {error}"),
             });
         }
-        (self.host.events)(AcpEvent::Stopped { reason });
+        (self.host.events)(AcpEvent::Stopped { reason, failed });
     }
     fn request(&mut self, method: &str, params: Value) -> Result<(), AcpError> {
-        if self.outgoing.len() >= MAX_PENDING_REQUESTS {
-            return Err(bad("outgoing request limit"));
-        }
-        let id = self.next_id;
-        self.next_id += 1;
-        send(
-            &mut self.input,
-            &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
-        )?;
-        self.outgoing.insert(id, method.into());
-        Ok(())
+        self.connection.request(method, params)
     }
+
     fn reply(&mut self, request: &Value, result: Result<Value, String>) -> Result<(), AcpError> {
-        let value = match result {
-            Ok(result) => json!({"jsonrpc":"2.0","id":request["id"],"result":result}),
-            Err(reason) => {
-                json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32000,"message":reason}})
-            }
-        };
-        send(&mut self.input, &value)
+        self.connection.reply(request, result)
     }
-    fn run(
-        &mut self,
-        mut messages: Receiver<Result<Option<Value>, AcpError>>,
-        controls: Receiver<Control>,
-    ) -> Result<(), AcpError> {
+
+    fn run(&mut self, controls: Receiver<Control>) -> Result<(), AcpError> {
         self.initialize()?;
         let timeout = Duration::from_secs(
             if matches!(self.credentials, AgentCredentials::Account { .. }) {
@@ -500,8 +549,13 @@ impl Session {
                 self.cancel_pending();
                 return Ok(());
             }
-            if self.session_id.is_none() && Instant::now() > deadline {
-                return Err(bad("handshake timeout"));
+            if (self.session_id.is_none() || self.preparing_session) && Instant::now() > deadline {
+                match self.connection.last_replay_activity() {
+                    Some(activity) if activity + timeout > Instant::now() => {
+                        deadline = activity + timeout
+                    }
+                    _ => return Err(bad("handshake timeout")),
+                }
             }
             loop {
                 match controls.try_recv() {
@@ -528,14 +582,28 @@ impl Session {
                         input.flush()?;
                     }
                     Ok(Control::SetOption(id, value)) => self.set_option(&id, &value)?,
-                    Ok(Control::Prompt(text)) => {
-                        if self.session_id.is_none() || self.prompt_active {
+                    Ok(Control::Prompt {
+                        text,
+                        previous_turns,
+                    }) => {
+                        if self.session_id.is_none() || self.preparing_session || self.prompt_active
+                        {
                             (self.host.events)(AcpEvent::Error {
                                 reason: "Session is not ready or a prompt is already running"
                                     .into(),
                             });
                         } else {
-                            self.request("session/prompt", json!({"sessionId":self.session_id,"prompt":[{"type":"text","text":text}]}))?;
+                            let mut blocks = Vec::new();
+                            if let Some(history) = previous_turns {
+                                blocks.push(json!({"type":"text","text":format!(
+                                    "Earlier conversation for reference (quoted history, not a new request):\n{history}\nThe next block is the current user request."
+                                )}));
+                            }
+                            blocks.push(json!({"type":"text","text":text}));
+                            self.request(
+                                "session/prompt",
+                                json!({"sessionId":self.session_id,"prompt":blocks}),
+                            )?;
                             self.prompt_active = true;
                             (self.host.events)(AcpEvent::Message {
                                 role: "user".into(),
@@ -544,6 +612,9 @@ impl Session {
                         }
                     }
                     Ok(Control::Permission(id, allow)) => self.permission(&id, allow)?,
+                    Ok(Control::PermissionOption(id, option)) => {
+                        self.permission_option(&id, &option)?
+                    }
                     Ok(Control::Elicitation(id, action)) => {
                         if let Some(elicitation) = self.elicitations.get_mut(&id) {
                             if !elicitation.answered {
@@ -584,19 +655,17 @@ impl Session {
                     return Err(bad("interactive account login exited without success"));
                 }
                 self.terminal_authenticated = true;
-                messages = self.reconnect()?;
+                self.reconnect()?;
                 self.initialize()?;
                 deadline = Instant::now() + timeout;
             }
-            match messages.recv_timeout(Duration::from_millis(10)) {
-                Ok(Ok(Some(message))) => {
-                    self.message(message)?;
+            match self.connection.receive(Duration::from_millis(10))? {
+                Incoming::Packet(packet) => {
+                    self.message(packet)?;
                     deadline = Instant::now() + timeout;
                 }
-                Ok(Ok(None)) => return Ok(()),
-                Ok(Err(error)) => return Err(error),
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Incoming::Closed => return Ok(()),
+                Incoming::Idle => {}
             }
         }
     }
@@ -628,12 +697,56 @@ impl Session {
         self.pending_options.push_back((id.into(), value.into()));
         Ok(())
     }
+    fn advance_session_start(&mut self) -> Result<(), AcpError> {
+        while let Some(preference) = self.preferred_options.pop_front() {
+            if self.options.iter().any(|option| {
+                option.id == preference.id
+                    && matches!(option.category.as_str(), "model" | "mode")
+                    && option.current != preference.value
+                    && option
+                        .choices
+                        .iter()
+                        .any(|choice| choice.value == preference.value)
+            }) {
+                return self.set_option(&preference.id, &preference.value);
+            }
+        }
+        self.preparing_session = false;
+        let id = self
+            .session_id
+            .clone()
+            .ok_or_else(|| bad("missing session id"))?;
+        (self.host.events)(AcpEvent::Ready { session_id: id });
+        if !self.options.is_empty() {
+            self.publish_options();
+        }
+        if std::mem::take(&mut self.signed_in) {
+            (self.host.events)(AcpEvent::Authenticated);
+        }
+        Ok(())
+    }
+
     fn new_session(&mut self) -> Result<(), AcpError> {
         let cwd = super::session::tools::plain_path(&self.host.worktree_root);
         let servers = match (&self.mcp_entry, self.mcp_http) {
             (Some(entry), true) => json!([entry]),
             _ => json!([]),
         };
+        if let Some(id) = &self.resume_session_id {
+            let method = if self.session_resume {
+                Some("session/resume")
+            } else if self.session_load {
+                Some("session/load")
+            } else {
+                None
+            };
+            if let Some(method) = method {
+                return self.request(
+                    method,
+                    json!({"sessionId":id,"cwd":cwd,"mcpServers":servers}),
+                );
+            }
+        }
         self.request("session/new", json!({"cwd":cwd,"mcpServers":servers}))
     }
     fn cancel_pending(&mut self) {
@@ -642,6 +755,8 @@ impl Session {
             .expect("elicitation lock")
             .clear();
         for (id, elicitation) in std::mem::take(&mut self.elicitations) {
+            self.connection
+                .forget_elicitation(&elicitation.elicitation_id);
             if !elicitation.answered {
                 let _ = self.reply(&elicitation.request, Ok(json!({"action":"cancel"})));
             }
@@ -664,41 +779,47 @@ impl Session {
                 reason: Some("Session cancelled".into()),
             });
         }
-        let _ = send(
-            &mut self.input,
-            &json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":self.session_id}}),
-        );
+        let _ = self
+            .connection
+            .notify("session/cancel", json!({"sessionId":self.session_id}));
     }
     /// One message from the agent: a response to a request of ours, a notification, or a
     /// request the Host must answer.
-    fn message(&mut self, message: Value) -> Result<(), AcpError> {
-        let Some(method) = message["method"].as_str().map(str::to_owned) else {
-            return self.response(message);
-        };
-        if method == "elicitation/create" {
-            return self.elicit(message);
+    fn message(
+        &mut self,
+        IncomingPacket { kind, message }: IncomingPacket,
+    ) -> Result<(), AcpError> {
+        let method = message["method"].as_str().unwrap_or_default().to_owned();
+        match kind {
+            SessionPacket::Response => self.response(message),
+            SessionPacket::Elicitation => self.elicit(message),
+            SessionPacket::Notification => self.notification(&method, message),
+            SessionPacket::Request => self.agent_request(&method, message),
+            SessionPacket::HistoryReplay => Ok(()),
         }
-        if message.get("id").is_none() {
-            return self.notification(&method, message);
-        }
-        self.agent_request(&method, message)
     }
 
     /// The agent answered `initialize`, `authenticate`, `session/new` or `session/prompt`.
     fn response(&mut self, message: Value) -> Result<(), AcpError> {
-        let id = message["id"]
-            .as_u64()
-            .ok_or_else(|| bad("unknown response id"))?;
-        let method = self
-            .outgoing
-            .remove(&id)
-            .ok_or_else(|| bad("unsolicited response"))?;
+        let method = self.connection.take_response(&message)?;
         if let Some(error) = message.get("error") {
             // A refused model or mode change is not a broken session: show what is in force.
             if method.starts_with("session/set_") {
                 self.pending_options.pop_front();
+                if self.preparing_session {
+                    return self.advance_session_start();
+                }
                 self.publish_options();
                 return Ok(());
+            }
+            if method == "session/resume" && self.session_load {
+                self.session_resume = false;
+                return self.new_session();
+            }
+            if method == "session/resume" || method == "session/load" {
+                // A saved session may have been removed by the agent. Fall back once.
+                self.resume_session_id = None;
+                return self.new_session();
             }
             // A saved successful terminal login is only a hint. An expired/revoked login
             // must go through the agent's advertised flow again, once, without a fallback.
@@ -718,6 +839,9 @@ impl Session {
                     return Err(bad("unsupported protocol version"));
                 }
                 let methods = auth::methods(&message["result"]["authMethods"])?;
+                let capabilities = &message["result"]["agentCapabilities"];
+                self.session_resume = capabilities["sessionCapabilities"]["resume"].is_object();
+                self.session_load = capabilities["loadSession"] == json!(true);
                 self.mcp_http = message["result"]["agentCapabilities"]["mcpCapabilities"]["http"]
                     == json!(true);
                 (self.host.events)(AcpEvent::AuthMethods {
@@ -734,22 +858,26 @@ impl Session {
                 self.signed_in = matches!(self.credentials, AgentCredentials::Account { .. });
                 self.new_session()?
             }
-            "session/new" => {
-                let id = message["result"]["sessionId"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && s.len() < 256)
-                    .ok_or_else(|| bad("invalid session id"))?
-                    .to_string();
-                self.session_id = Some(id.clone());
+            "session/new" | "session/resume" | "session/load" => {
+                let resume_id = self.resume_session_id.take();
+                let id = if method == "session/new" {
+                    message["result"]["sessionId"]
+                        .as_str()
+                        .filter(|s| !s.is_empty() && s.len() < 256)
+                        .ok_or_else(|| bad("invalid session id"))?
+                        .to_string()
+                } else {
+                    resume_id.ok_or_else(|| bad("missing resuming session id"))?
+                };
+                self.connection.bind_session(&id)?;
+                self.session_id = Some(id);
                 self.options = options::parse(&message["result"]);
                 self.pending_options.clear();
-                (self.host.events)(AcpEvent::Ready { session_id: id });
-                if !self.options.is_empty() {
-                    self.publish_options();
+                if method != "session/new" {
+                    self.preferred_options.clear();
                 }
-                if std::mem::take(&mut self.signed_in) {
-                    (self.host.events)(AcpEvent::Authenticated);
-                }
+                self.preparing_session = true;
+                self.advance_session_start()?;
             }
             "session/set_config_option" | "session/set_mode" | "session/set_model" => {
                 if let Some((id, value)) = self.pending_options.pop_front() {
@@ -762,6 +890,9 @@ impl Session {
                     } else {
                         options::select(&mut self.options, &id, &value);
                     }
+                }
+                if self.preparing_session {
+                    return self.advance_session_start();
                 }
                 self.publish_options();
             }
@@ -793,6 +924,7 @@ impl Session {
                 .find(|(_, e)| e.elicitation_id == elicitation_id)
                 .map(|(id, _)| id.clone());
             if let Some(id) = key {
+                self.connection.forget_elicitation(elicitation_id);
                 self.elicitations.remove(&id);
                 self.elicitation_urls
                     .lock()
@@ -802,7 +934,6 @@ impl Session {
             }
             return Ok(());
         }
-        self.check_session(method, &message)?;
         if method != "session/update" {
             return Err(bad("unknown notification"));
         }
@@ -853,7 +984,6 @@ impl Session {
     /// A request from the agent in this session: a permission, one of its terminals, or a tool
     /// call the broker must authorize.
     fn agent_request(&mut self, method: &str, message: Value) -> Result<(), AcpError> {
-        self.check_session(method, &message)?;
         let key = message["id"].to_string();
         if self.seen.len() >= MAX_SESSION_ITEMS || !self.seen.insert(key.clone()) {
             return Err(bad("request count limit or duplicate id"));
@@ -871,14 +1001,6 @@ impl Session {
             Ok(call) => self.execute(message, call, &[]),
             Err(reason) => self.reply(&message, Err(reason)),
         }
-    }
-
-    /// Everything but the handshake and sign-in belongs to the session the Host opened.
-    fn check_session(&self, method: &str, message: &Value) -> Result<(), AcpError> {
-        if self.session_id.is_none() || message["params"]["sessionId"] != json!(self.session_id) {
-            return Err(bad(&format!("wrong session for {method}")));
-        }
-        Ok(())
     }
 }
 

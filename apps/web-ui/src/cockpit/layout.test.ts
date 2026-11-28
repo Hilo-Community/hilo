@@ -21,6 +21,8 @@ describe("@hilo/web-ui — cockpit layout, panels and keyboard", () => {
     const controller = new CockpitDomController({ rootContainer, stores, editorView });
     const editorDom = editorView.getEditorView().dom;
     const toggle = document.querySelector<HTMLButtonElement>(".hilo-inspector-toggle");
+    const inspectorIcon = toggle?.querySelector("svg");
+    expect(inspectorIcon?.querySelector('path[d="M16 8L16 16"]')).not.toBeNull();
     const shell = rootContainer.querySelector<HTMLElement>(".hilo-cockpit-shell");
     const header = document.querySelector<HTMLElement>(".hilo-zone-4-header");
     // The right panel starts closed (the editor stays mounted, only hidden).
@@ -33,16 +35,20 @@ describe("@hilo/web-ui — cockpit layout, panels and keyboard", () => {
     expect(stores.zone1.getState().inspectorOpen).toBe(true);
     expect(header?.style.visibility).toBe("visible");
     expect(toggle?.getAttribute("aria-label")).toBe("Hide right panel");
+    expect(toggle?.querySelector("svg")).toBe(inspectorIcon);
     expect(editorView.getEditorView().dom).toBe(editorDom);
     toggle?.click();
     expect(stores.zone1.getState().inspectorOpen).toBe(false);
     expect(editorView.getEditorView().dom).toBe(editorDom);
     toggle?.click();
     const sidebarToggle = document.querySelector<HTMLButtonElement>(".hilo-sidebar-toggle");
+    const sidebarIcon = sidebarToggle?.querySelector("svg");
+    expect(sidebarIcon?.querySelector('path[d="M16 8L16 16"]')).not.toBeNull();
     expect(sidebarToggle?.getAttribute("aria-label")).toBe("Hide sidebar");
     sidebarToggle?.click();
     expect(stores.zone1.getState().sidebarOpen).toBe(false);
     expect(sidebarToggle?.getAttribute("aria-label")).toBe("Show sidebar");
+    expect(sidebarToggle?.querySelector("svg")).toBe(sidebarIcon);
     expect(editorView.getEditorView().dom).toBe(editorDom);
     controller.destroy();
     rootContainer.remove();

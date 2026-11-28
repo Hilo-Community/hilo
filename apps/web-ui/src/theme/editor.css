@@ -1,6 +1,6 @@
 @layer components {
   .hilo-zone-4-inspector {
-    @apply bg-main border border-white/8 rounded-tr-[16px] rounded-br-[16px] flex flex-col h-full overflow-hidden;
+    @apply bg-main border border-divider rounded-tr-[16px] rounded-br-[16px] flex flex-col h-full overflow-hidden;
   }
 
   .hilo-zone-4-editor-host,

@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { SidebarRow, sessionDisplayTitle, splitSessionNumber } from "./sidebar-row.js";
+import {
+  SidebarRow,
+  relativeTime,
+  sessionDisplayTitle,
+  splitSessionNumber,
+} from "./sidebar-row.js";
 
 describe("session number written after the name", () => {
   it("splits '#16 New session' into its number and name", () => {
@@ -25,5 +30,28 @@ describe("session number written after the name", () => {
     const group = new SidebarRow(document, { kind: "group", onSelect: () => {}, onMore: () => {} });
     group.update("#1 Workspace", false, true);
     expect(group.el.querySelector(".sidebar-row-title")?.textContent).toBe("#1 Workspace");
+  });
+});
+
+describe("relative time under a session's title", () => {
+  const now = Date.UTC(2026, 10, 28, 12);
+  it("reads the elapsed time in the largest whole unit", () => {
+    expect(relativeTime(now - 20_000, now)).toBe("just now");
+    expect(relativeTime(now + 5_000, now)).toBe("just now");
+    expect(relativeTime(now - 60_000, now)).toBe("1 minute ago");
+    expect(relativeTime(now - 23 * 60_000, now)).toBe("23 minutes ago");
+    expect(relativeTime(now - 2 * 3_600_000, now)).toBe("2 hours ago");
+    expect(relativeTime(now - 26 * 3_600_000, now)).toBe("yesterday");
+    expect(relativeTime(now - 10 * 86_400_000, now)).toBe("last week");
+  });
+
+  it("adds and removes the second line without touching the title", () => {
+    const row = new SidebarRow(document, { kind: "session", onSelect: () => {}, onMore: () => {} });
+    row.update("Review", false);
+    row.setSubtitle("3 minutes ago");
+    expect(row.el.querySelector(".sidebar-row-subtitle")?.textContent).toBe("3 minutes ago");
+    row.setSubtitle(null);
+    expect(row.el.querySelector(".sidebar-row-subtitle")).toBeNull();
+    expect(row.el.querySelector(".sidebar-row-title")?.textContent).toBe("Review");
   });
 });

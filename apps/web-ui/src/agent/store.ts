@@ -42,7 +42,12 @@ export type AcpEvent =
       reason: string | null;
     }
   | { type: "message"; role: string; text: string }
-  | { type: "stopped" | "error"; reason: string };
+  | { type: "error"; reason: string }
+  /**
+   * The session ended. `failed: false` is an ordinary end (the agent exited, its lease ran out,
+   * it was stopped): the chat keeps looking connected and reconnects on the next message.
+   */
+  | { type: "stopped"; reason: string; failed?: boolean };
 export interface AgentHandle {
   startLogin?(): Promise<void>;
   /** Opens the sign-in page again, when the browser did not open or was closed. */
@@ -53,16 +58,22 @@ export interface AgentHandle {
   setOption?(optionId: string, value: string): Promise<void>;
   writeLogin?(data: string): Promise<void>;
   resizeLogin?(cols: number, rows: number): Promise<void>;
-  prompt(text: string): Promise<void>;
+  prompt(text: string, previousTurns?: string): Promise<void>;
   cancel(): Promise<void>;
   stop(): Promise<void>;
-  answer(id: string, allow: boolean): Promise<void>;
+  answer(id: string, choice: boolean | string): Promise<void>;
   /** `open` shows the sign-in page again without answering the agent. */
   elicit?(id: string, action: "accept" | "decline" | "cancel" | "open"): Promise<void>;
 }
 export interface AgentHost {
   start(
-    config: { installedAgentId: string },
+    config: {
+      installedAgentId: string;
+      conversationId?: string;
+      resumeSessionId?: string;
+      expectedWorkspace?: string;
+      preferredOptions?: readonly SavedAgentOption[];
+    },
     onEvent: (event: AcpEvent) => void,
   ): Promise<AgentHandle>;
   /**
@@ -73,6 +84,11 @@ export interface AgentHost {
   /** Keeps each panel's conversation between runs. Without it, a conversation lives one run. */
   transcripts?: AgentTranscripts;
 }
+export interface SavedAgentOption {
+  id: string;
+  value: string;
+}
+
 /** A choice the agent offers for its session: a model, a mode, an effort. */
 export interface AgentOption {
   id: string;
@@ -116,11 +132,13 @@ export interface AgentState {
   /** The sign-in methods to choose from, while the Host waits for the user's pick. */
   authChoice: { id: string; name: string; type?: string }[] | null;
   ready: boolean;
+  sessionId?: string | undefined;
   busy: boolean;
-  /** The conversation was loaded from a previous run; the agent does not remember it. */
+  /** Loaded from a previous run without an ACP session to resume: the agent gets a summary. */
   restored: boolean;
   /** What the agent lets the user choose for this session. Empty if it offers nothing. */
   options: AgentOption[];
+  savedOptions?: readonly SavedAgentOption[];
   turn: Turn | null;
   messages: { id: string; role: string; text: string; html: readonly string[] }[];
   /** Messages, thoughts and tool calls interleaved as they arrived: the panel draws this order. */
@@ -128,7 +146,7 @@ export interface AgentState {
   plan: { content: string; status: string }[];
   tools: ToolCard[];
   thoughts: Thought[];
-  permissions: { id: string; reason: string }[];
+  permissions: { id: string; reason: string; options?: unknown }[];
   elicitations: { id: string; url: string; message: string; accepted: boolean }[];
   error: string;
 }
@@ -398,6 +416,7 @@ export class AgentStore extends AtomicStore<AgentState> {
             break;
           case "ready":
             s.ready = true;
+            s.sessionId = event.sessionId;
             s.authChoice = null;
             s.error = "";
             break;
@@ -433,6 +452,9 @@ export class AgentStore extends AtomicStore<AgentState> {
                   ]
                 : [];
             });
+            s.savedOptions = s.options
+              .filter(({ category }) => category === "model" || category === "mode")
+              .map(({ id, current }) => ({ id, value: current }));
             break;
           case "proposedEdit":
             tool(event.edit.id, {
@@ -471,7 +493,8 @@ export class AgentStore extends AtomicStore<AgentState> {
             s.elicitations = [];
             s.terminalAuth = null;
             s.authChoice = null;
-            s.error = event.reason;
+            // Only a failure is shown; an ordinary end leaves the chat as it was.
+            s.error = event.failed === false ? "" : event.reason;
             s.tools = s.tools.map((t) =>
               t.status === "pending" || t.status === "running"
                 ? { ...t, status: "denied", reason: event.reason }
@@ -570,7 +593,9 @@ export class AgentStore extends AtomicStore<AgentState> {
     this.sealed = true;
     this.setState((s) => ({
       ...s,
-      restored: true,
+      restored: !snapshot.sessionId,
+      sessionId: snapshot.sessionId,
+      savedOptions: snapshot.savedOptions ?? [],
       messages,
       timeline: snapshot.timeline,
       tools,

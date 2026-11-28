@@ -1,3 +1,4 @@
+import { acceptCompletion, autocompletion, completionStatus } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, insertNewline } from "@codemirror/commands";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
@@ -14,6 +15,7 @@ export interface PromptInputOptions {
   /** Enter; Shift+Enter makes a new line. Never fired while an input method is composing. */
   onSubmit(): void;
   onFocus?(): void;
+  mentionPaths?(query: string): readonly string[];
   /**
    * True once the text needs more than one line (wrapped or a newline), false when it fits on
    * one again. A host can then move its buttons under the text.
@@ -62,6 +64,31 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
     state: EditorState.create({
       extensions: [
         history(),
+        ...(options.mentionPaths
+          ? [
+              autocompletion({
+                interactionDelay: 0,
+                override: [
+                  (context) => {
+                    const match = context.matchBefore(/(?:^|\s)@[^\s@"]*$/);
+                    if (!match) return null;
+                    const at = match.text.indexOf("@");
+                    const paths = options.mentionPaths?.(match.text.slice(at + 1)) ?? [];
+                    if (!paths.length) return null;
+                    return {
+                      from: match.from + at,
+                      filter: false,
+                      options: paths.map((path) => ({
+                        label: path,
+                        apply: `@${/\s|"/.test(path) ? JSON.stringify(path) : path} `,
+                        type: "text",
+                      })),
+                    };
+                  },
+                ],
+              }),
+            ]
+          : []),
         drawSelection(),
         // The code editor's rounded, text-only selection, not the system's highlight.
         textOnlySelection(),
@@ -94,7 +121,11 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
           keymap.of([
             {
               key: "Enter",
-              run: () => {
+              run: (view) => {
+                if (options.mentionPaths && completionStatus(view.state) === "active") {
+                  acceptCompletion(view);
+                  return true;
+                }
                 options.onSubmit();
                 return true;
               },
@@ -144,7 +175,7 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
           // One line, cut with an ellipsis in a narrow panel: a wrapped hint would make the
           // empty field two lines tall.
           ".cm-placeholder": {
-            color: "var(--color-text-secondary, #878888)",
+            color: "var(--color-text-placeholder, #a4a4a4)",
             display: "inline-block",
             maxWidth: "100%",
             overflow: "hidden",
@@ -153,7 +184,7 @@ export function createPromptInput(parent: HTMLElement, options: PromptInputOptio
             verticalAlign: "top",
           },
           ".cm-cursor, .cm-dropCursor": {
-            borderLeftColor: "#f0f4f8",
+            borderLeftColor: "var(--color-text-primary, #f0f4f8)",
             borderLeftWidth: "1.5px",
           },
           ".cm-line ::selection, .cm-line::selection, .cm-content ::selection": {

@@ -84,6 +84,10 @@ export interface Zone2SidebarState {
   readonly impactedTests: readonly CockpitImpactedTestItem[];
 }
 
+export type SavedChatMessages = Readonly<
+  Record<string, readonly Pick<CockpitChatMessage, "messageId" | "role" | "content">[]>
+>;
+
 export interface CockpitChatMessage {
   readonly messageId: string;
   readonly chatId: string;
@@ -103,7 +107,7 @@ interface SessionBase {
   readonly targetDocumentId?: string;
   readonly targetDocumentContent?: string;
   readonly previewUrl?: string;
-  /** Creation or most recent session activity, in milliseconds since the Unix epoch. */
+  /** When the session was created or last had activity (an agent turn changing state), in ms. */
   readonly lastActiveAt?: number;
 }
 export interface CockpitAgentSession extends SessionBase {
@@ -111,6 +115,9 @@ export interface CockpitAgentSession extends SessionBase {
   readonly agentId?: string;
   readonly agentName?: string;
   readonly modelName: string;
+  readonly panelHidden?: boolean;
+  readonly cwd?: string;
+  readonly createdAt?: number;
   readonly agentExecutionStatus?: "Idle" | "Running" | "QueuedSequential";
   /** Derived from the panel's `AgentStore`: a turn is running, a permission is pending, it errored, or it just finished. */
   readonly statusBadge?: "running" | "waiting" | "done" | "error" | undefined;
@@ -172,12 +179,14 @@ export type CreateChatOptions = CreatePanelOptions &
   (
     | {
         readonly kind?: "agent";
+        readonly native?: true;
         readonly modelName?: string;
         readonly agentId?: string;
         readonly agentName?: string;
       }
     | {
         readonly kind: "terminal";
+        readonly native?: never;
         readonly modelName?: never;
         readonly agentId?: never;
         readonly agentName?: never;
@@ -196,6 +205,8 @@ export interface CockpitStoreBundle extends WorkspaceNavigationActions {
    * While one is maximized the header tabs switch which one is shown.
    */
   toggleMaximizeChat(chatId: string): void;
+  /** Shows every session of a tab tiled again (picking the tab in the sidebar). */
+  showGroupTiled(groupId: string): void;
   /** Same check as `createChat`, without creating anything. */
   canCreateChat(options?: CreateChatOptions): boolean;
   /** Size in pixels of the area holding the panels; unknown (null) means no size limit. */
@@ -213,6 +224,7 @@ export interface CockpitStoreBundle extends WorkspaceNavigationActions {
   setUiZoomPercent(zoomPercent: number): void;
   setInspectorTab(tab: InspectorTab): void;
   selectChat(chatId: string): number;
+  hideChatPanel(chatId: string): void;
   closeChat(chatId: string): void;
   setFileTree(fileTree: readonly CockpitFileTreeNode[]): void;
   selectFileFromTree(filePath: string, contentOverride?: string): number;
@@ -259,6 +271,7 @@ export interface CockpitStoreOptions {
   initialActiveChatId?: string | undefined;
   initialActiveDocumentId?: string | undefined;
   initialChats?: readonly CockpitChatTab[] | undefined;
+  initialChatMessages?: SavedChatMessages | undefined;
   initialFileTree?: readonly CockpitFileTreeNode[] | undefined;
   initialUiZoomPercent?: number | undefined;
   initialRecoveredFromWal?: boolean | undefined;

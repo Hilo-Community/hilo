@@ -136,7 +136,10 @@ describe("conversation order", () => {
     const state = store.getState();
     expect(state.messages.map((m) => m.text)).toEqual(["First. Still first.", "Second."]);
     expect(state.timeline.map((ref) => ref.type)).toEqual(["message", "tool", "message", "tool"]);
-    const shown = new ConversationView().elements(document, state, button, actions());
+    // The finished answer's Copy / Retry row is not part of the order being checked.
+    const shown = new ConversationView()
+      .elements(document, state, button, actions())
+      .filter((el) => !el.classList.contains("hilo-agent-response-actions"));
     expect(shown.map((el) => el.tagName)).toEqual(["ARTICLE", "ARTICLE", "ARTICLE", "ARTICLE"]);
     expect(shown[0]?.textContent).toBe("First. Still first.");
     expect(shown[2]?.textContent).toBe("Second.");
@@ -167,16 +170,21 @@ describe("conversation extras", () => {
     const header = root.querySelector("button") as HTMLButtonElement;
     header.click();
     header.focus();
+    const withMessage = {
+      ...state,
+      messages: [{ id: "m", role: "assistant", text: "hello", html: ["<p>hello</p>"] }],
+      timeline: [...state.timeline, { type: "message" as const, id: "m" }],
+    };
+    view.render(root, withMessage, button, callbacks);
+    const article = root.querySelector("article[data-role='assistant']");
     view.render(
       root,
-      {
-        ...state,
-        messages: [{ id: "m", role: "assistant", text: "hello", html: ["<p>hello</p>"] }],
-        timeline: [...state.timeline, { type: "message", id: "m" }],
-      },
+      { ...withMessage, messages: [{ id: "m", role: "assistant", text: "hello world", html: [] }] },
       button,
       callbacks,
     );
+    expect(root.querySelector("article[data-role='assistant']")).toBe(article);
+    expect(article?.textContent).toBe("hello world");
     expect(root.querySelector("button")).toBe(header);
     expect(document.activeElement).toBe(header);
     expect(header.getAttribute("aria-expanded")).toBe("true");

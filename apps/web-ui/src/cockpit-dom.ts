@@ -21,7 +21,7 @@ import { JudgeController } from "./judge/controller.js";
 import type { JudgeHost } from "./judge/types.js";
 import { OnboardingModalController, createInitialOnboardingState } from "./onboarding/index.js";
 import { type AgentRegistryHost, SettingsPage } from "./settings/index.js";
-import { UiPreferences, browserStorage } from "./state/ui-preferences.js";
+import { UiPreferences, browserStorage, watchTheme } from "./state/ui-preferences.js";
 import type {
   CockpitAstSymbolItem,
   CockpitFileTreeNode,
@@ -30,6 +30,7 @@ import type {
   CockpitStoreBundle,
   Zone4InspectorState,
 } from "./stores/index.js";
+import type { NativeChatHost } from "./ui/chat-composer.js";
 import { UI_STRINGS, uiText } from "./ui/ui-strings.js";
 
 export type {
@@ -86,6 +87,7 @@ export interface CockpitDomControllerOptions {
   /** JavaScript debugging (F5). Without it the debugger is not offered. */
   readonly debugHost?: DebugHost;
   readonly agentHost?: AgentHost;
+  readonly nativeChat?: NativeChatHost;
   /** The Judge (`LOT-015`): reviews of agent changes. Without it agent changes are never applied. */
   readonly judgeHost?: JudgeHost;
   /** The ACP agent registry of the Settings screen. Without it there is no Settings button. */
@@ -170,10 +172,11 @@ export class CockpitDomController {
 
     const doc = rootContainer.ownerDocument;
     const preferences = new UiPreferences(browserStorage(doc));
+    this.unsubscribers.push(watchTheme(doc, preferences));
     rootContainer.replaceChildren();
     this.titleBar = new TitleBar(doc, rootContainer, stores);
     this.settings = options.agentRegistryHost
-      ? new SettingsPage(doc, { agentRegistry: options.agentRegistryHost })
+      ? new SettingsPage(doc, { agentRegistry: options.agentRegistryHost, preferences })
       : null;
     this.activityBar = new ActivityBar(
       doc,
@@ -277,6 +280,7 @@ export class CockpitDomController {
         : undefined,
       options.agentRegistryHost,
       options.openWorkspace ? () => void this.sidebar.openProject() : undefined,
+      options.nativeChat,
     );
 
     this.shell = doc.createElement("div");
@@ -487,9 +491,14 @@ export class CockpitDomController {
    * still open, it shares that prompt's answer.
    */
   confirmClose(): Promise<boolean> {
-    this.closePrompt ??= this.askBeforeClosing().finally(() => {
-      this.closePrompt = null;
-    });
+    this.closePrompt ??= this.askBeforeClosing()
+      .then(async (allowed) => {
+        if (allowed) await this.chatGrid.flushTranscripts();
+        return allowed;
+      })
+      .finally(() => {
+        this.closePrompt = null;
+      });
     return this.closePrompt;
   }
 

@@ -143,6 +143,137 @@ fn next(rx: &Receiver<AcpEvent>) -> AcpEvent {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
+fn replacement_session_applies_available_preferences_before_ready() {
+    let fixture = Fixture::new();
+    let runner = sandbox_runner::native_sandbox(Arc::new(TracingAuditSink)).unwrap();
+    let (host, rx) = fixture.host(Arc::from(runner));
+    let _session = AcpSessionSupervisor::start_with_preferences(
+        host,
+        fixture.launch("options"),
+        None,
+        vec![
+            AcpOptionPreference {
+                id: "mode".into(),
+                value: "unavailable".into(),
+            },
+            AcpOptionPreference {
+                id: "model".into(),
+                value: "fast".into(),
+            },
+            AcpOptionPreference {
+                id: "mode".into(),
+                value: "plan".into(),
+            },
+        ],
+    )
+    .unwrap();
+    loop {
+        match next(&rx) {
+            AcpEvent::Ready { .. } => break,
+            AcpEvent::Update { .. } => {}
+            other => panic!("unexpected startup event: {other:?}"),
+        }
+    }
+    let AcpEvent::Options { options } = next(&rx) else {
+        panic!("missing options")
+    };
+    assert!(options
+        .iter()
+        .any(|option| option.id == "mode" && option.current == "plan"));
+    assert!(options
+        .iter()
+        .any(|option| option.id == "model" && option.current == "fast"));
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn failed_resume_and_load_continue_with_a_new_session_and_separate_history() {
+    let fixture = Fixture::new();
+    let runner = sandbox_runner::native_sandbox(Arc::new(TracingAuditSink)).unwrap();
+    let (host, rx) = fixture.host(Arc::from(runner));
+    let session = AcpSessionSupervisor::start_with_resume(
+        host,
+        fixture.launch("recovery-fallback"),
+        Some("saved".into()),
+    )
+    .unwrap();
+    assert!(matches!(next(&rx), AcpEvent::Ready { session_id } if session_id == "replacement"));
+    session
+        .prompt_with_history(
+            "follow-up".into(),
+            Some(r#"[{"role":"user","text":"saved user turn"}]"#.into()),
+        )
+        .unwrap();
+    assert!(matches!(next(&rx), AcpEvent::Message { text, .. } if text == "follow-up"));
+    assert!(matches!(next(&rx), AcpEvent::Update { update }
+        if update["sessionUpdate"] == "turn_complete"));
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_load_cannot_route_updates_to_a_different_chat() {
+    let fixture = Fixture::new();
+    let runner = sandbox_runner::native_sandbox(Arc::new(TracingAuditSink)).unwrap();
+    let (host, rx) = fixture.host(Arc::from(runner));
+    let _session = AcpSessionSupervisor::start_with_resume(
+        host,
+        fixture.launch("foreign-replay"),
+        Some("saved".into()),
+    )
+    .unwrap();
+    // A protocol failure is reported as one: the chat shows it instead of reconnecting silently.
+    assert!(matches!(next(&rx), AcpEvent::Stopped { reason, failed: true }
+        if reason.contains("wrong session for session/update")));
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn an_inline_permission_returns_only_an_advertised_option_id() {
+    let fixture = Fixture::new();
+    let (session, rx) = fixture.start("permission-choice");
+    assert!(matches!(next(&rx), AcpEvent::Message { .. }));
+    let AcpEvent::Permission { id, .. } = next(&rx) else {
+        panic!("expected the agent's permission request");
+    };
+    session
+        .answer_permission_option(id.clone(), "unknown".into())
+        .unwrap();
+    session
+        .answer_permission_option(id, "remember".into())
+        .unwrap();
+    assert!(matches!(next(&rx), AcpEvent::Update { update }
+        if update["content"]["text"] == "choice confirmed"));
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn restores_an_acp_session_and_suppresses_history_already_displayed_by_the_client() {
+    for mode in ["resume", "load"] {
+        let fixture = Fixture::new();
+        let runner = sandbox_runner::native_sandbox(Arc::new(TracingAuditSink)).unwrap();
+        let (host, rx) = fixture.host(Arc::from(runner));
+        let mut session = AcpSessionSupervisor::start_with_resume(
+            host,
+            fixture.launch(mode),
+            Some("saved".into()),
+        )
+        .unwrap();
+        assert!(matches!(next(&rx), AcpEvent::Ready { session_id } if session_id == "saved"));
+        session.prompt("follow-up".into()).unwrap();
+        assert!(matches!(next(&rx), AcpEvent::Message { text, .. } if text == "follow-up"));
+        // An ordinary end is not a failure: the chat reconnects on its next message.
+        session.stop();
+        loop {
+            if let AcpEvent::Stopped { failed, .. } = next(&rx) {
+                assert!(!failed, "{mode}: a requested stop is not a failure");
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
 fn generic_gateway_authentication_precedes_session_creation_and_a_real_fixture_turn() {
     let f = Fixture::new();
     let runner = sandbox_runner::native_sandbox(Arc::new(TracingAuditSink)).unwrap();
@@ -797,7 +928,7 @@ fn a_verbose_command_keeps_the_end_of_its_output_and_the_session_alive() {
     let output = loop {
         match next(&rx) {
             AcpEvent::Permission { id, .. } => session.answer_permission(id, true).unwrap(),
-            AcpEvent::Stopped { reason } => panic!("the session ended: {reason}"),
+            AcpEvent::Stopped { reason, .. } => panic!("the session ended: {reason}"),
             AcpEvent::Update { update } => {
                 let text = update["content"]["text"].as_str().unwrap_or("");
                 let echoed: serde_json::Value = serde_json::from_str(text).unwrap_or_default();

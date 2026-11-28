@@ -16,7 +16,7 @@ export function createTauriAgentHost(invoke: Invoke, channel: () => AgentChannel
       const events = channel();
       events.onmessage = onEvent;
       const id = await invoke<number>("agent_start_command", {
-        installedAgentId: config.installedAgentId,
+        ...config,
         events,
       });
       return {
@@ -27,10 +27,16 @@ export function createTauriAgentHost(invoke: Invoke, channel: () => AgentChannel
         writeLogin: (data) => invoke("agent_terminal_auth_input_command", { id, data }),
         resizeLogin: (cols, rows) =>
           invoke("agent_terminal_auth_resize_command", { id, cols, rows }),
-        prompt: (text) => invoke("agent_prompt_command", { id, text }),
+        prompt: (text, previousTurns) =>
+          invoke("agent_prompt_command", { id, text, previousTurns }),
         cancel: () => invoke("agent_cancel_command", { id }),
         stop: () => invoke("agent_stop_command", { id }),
-        answer: (requestId, allow) => invoke("agent_permission_command", { id, requestId, allow }),
+        answer: (requestId, choice) =>
+          invoke("agent_permission_command", {
+            id,
+            requestId,
+            ...(typeof choice === "string" ? { optionId: choice } : { allow: choice }),
+          }),
         elicit: (requestId, action) =>
           invoke("agent_elicitation_command", { id, requestId, action }),
       };

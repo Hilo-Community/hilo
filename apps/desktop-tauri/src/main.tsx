@@ -16,6 +16,7 @@ import {
 import "./shell.css";
 import type { AcpEvent } from "@hilo/web-ui";
 import { createAgentFinishedAlert } from "./agent-alert.js";
+import { NativeThreadHistory } from "./native-thread-history.js";
 import { createTauriAgentHost } from "./tauri-agent-host.js";
 import { createTauriAgentRegistryHost } from "./tauri-agent-registry-host.js";
 import { TauriBinaryHostBridge } from "./tauri-binary-host-bridge.js";
@@ -80,10 +81,21 @@ function HiloDesktopApp() {
     let sessionPersistenceTimer: number | undefined;
     let stopListeningForClose: (() => void) | undefined;
     let stopListeningForDiagnostics: (() => void) | undefined;
+    let sessionWrite = Promise.resolve();
+    const agentHost = createTauriAgentHost(invoke, () => new Channel<AcpEvent>());
+    const nativeHistory = agentHost.transcripts
+      ? new NativeThreadHistory(agentHost.transcripts)
+      : null;
     const persistSession = () => {
       if (!desktop) return;
-      const payload = Array.from(desktop.exportSessionCacheBinary());
-      void invoke("save_session_cache_command", { payload });
+      const state = desktop.stores.zone3.getState();
+      const payload = Array.from(desktop.exportSessionCacheBinary(!nativeHistory));
+      const write = sessionWrite.then(async () => {
+        await nativeHistory?.save(state);
+        await invoke<void>("save_session_cache_command", { payload });
+      });
+      sessionWrite = write.catch(() => undefined);
+      return write;
     };
 
     void invoke<number[] | null>("load_session_cache_command")
@@ -96,7 +108,15 @@ function HiloDesktopApp() {
           const candidate = Uint8Array.from(cachedBytes);
           try {
             const snapshot = decodeWorkspaceSessionCacheBinary(candidate);
-            validCachedBytes = candidate;
+            if (nativeHistory) {
+              const chatMessages = await nativeHistory.load(
+                snapshot.chats ?? [],
+                snapshot.chatMessages,
+              );
+              validCachedBytes = encodeWorkspaceSessionCacheBinary({ ...snapshot, chatMessages });
+            } else {
+              validCachedBytes = candidate;
+            }
             if (snapshot.workspaceRoot && snapshot.workspaceRoot !== "/workspace/hilo") {
               const nodes = await invoke<NativeWorkspaceNode[]>("load_workspace_command", {
                 root: snapshot.workspaceRoot,
@@ -113,7 +133,7 @@ function HiloDesktopApp() {
                     }).catch(() => "")
                   : "// Empty workspace\n";
                 validCachedBytes = encodeWorkspaceSessionCacheBinary({
-                  ...snapshot,
+                  ...decodeWorkspaceSessionCacheBinary(validCachedBytes),
                   activeDocumentId,
                   activeDocumentContent,
                 });
@@ -162,7 +182,12 @@ function HiloDesktopApp() {
             () => new Channel<ArrayBuffer>(),
             () => new Channel<{ agentId: string | null; busy: boolean }>(),
           ),
-          agentHost: createTauriAgentHost(invoke, () => new Channel<AcpEvent>()),
+          agentHost,
+          nativeChat: {
+            send: (requestId, messages) =>
+              invoke<string>("native_chat_command", { requestId, messages }),
+            cancel: (requestId) => invoke<void>("cancel_native_chat_command", { requestId }),
+          },
           judgeHost: createTauriJudgeHost(invoke, listen),
           agentRegistryHost: createTauriAgentRegistryHost(invoke),
           openSettingsWindow: () => invoke<void>("open_settings_window_command"),
@@ -206,7 +231,9 @@ function HiloDesktopApp() {
         desktop.editorView.setInlineCompletionProvider((request) =>
           invoke<InlineCompletionResponse | null>("inline_completion_command", { request }),
         );
-        sessionPersistenceTimer = window.setInterval(persistSession, 2_000);
+        sessionPersistenceTimer = window.setInterval(() => {
+          void persistSession()?.catch(() => undefined);
+        }, 2_000);
         // The editor places each batch by its revision, and drops what its text has moved past.
         void listen<DocumentDiagnostics>(DOCUMENT_DIAGNOSTICS_EVENT, (event) => {
           desktop?.editorView.applyDocumentDiagnostics(event.payload);
@@ -214,15 +241,18 @@ function HiloDesktopApp() {
           if (cancelled) stopListening();
           else stopListeningForDiagnostics = stopListening;
         });
-        // Closing or quitting with unsaved changes: ask here, then tell Rust to go ahead.
+        // Flush the chat history and session cache before letting Rust close the window.
         void listen(CLOSE_REQUESTED_EVENT, async () => {
           const allowed = (await desktop?.domController?.confirmClose()) ?? true;
           if (!allowed) return;
-          persistSession();
+          await persistSession()?.catch(() => undefined);
           await invoke("confirm_exit_command");
         }).then((stopListening) => {
           if (cancelled) stopListening();
-          else stopListeningForClose = stopListening;
+          else {
+            stopListeningForClose = stopListening;
+            return invoke("register_close_handler_command");
+          }
         });
       });
 
@@ -232,7 +262,7 @@ function HiloDesktopApp() {
       stopListeningForClose?.();
       stopListeningForDiagnostics?.();
       if (desktop) {
-        persistSession();
+        void persistSession()?.catch(() => undefined);
         desktop.destroy();
       }
     };

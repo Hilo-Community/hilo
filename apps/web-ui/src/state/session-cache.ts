@@ -1,5 +1,5 @@
+import { HILO_STATE_META } from "@hilo/protocol-types";
 import type { CockpitChatTab } from "../stores/types.js";
-import { HILO_DESIGN_TOKENS } from "../ui/design-state-tokens.js";
 
 /** Upgrade old JSON sessions once; live stores never infer kind from a model label. */
 export function restoreCachedSession(value: unknown): CockpitChatTab {
@@ -9,7 +9,7 @@ export function restoreCachedSession(value: unknown): CockpitChatTab {
     typeof legacy.chatId !== "string" ||
     typeof legacy.title !== "string" ||
     typeof legacy.validationState !== "string" ||
-    !Object.hasOwn(HILO_DESIGN_TOKENS, legacy.validationState)
+    !Object.hasOwn(HILO_STATE_META, legacy.validationState)
   ) {
     throw new Error("Invalid cached session identity");
   }
@@ -46,6 +46,11 @@ export function restoreCachedSession(value: unknown): CockpitChatTab {
         }
       : {}),
     modelName: legacy.modelName,
+    ...(typeof legacy.cwd === "string" && legacy.cwd ? { cwd: legacy.cwd } : {}),
+    ...(typeof legacy.createdAt === "number" && Number.isFinite(legacy.createdAt)
+      ? { createdAt: legacy.createdAt }
+      : {}),
+    ...(legacy.panelHidden === true ? { panelHidden: true } : {}),
     ...(status === "Idle" || status === "Running" || status === "QueuedSequential"
       ? { agentExecutionStatus: status }
       : {}),
