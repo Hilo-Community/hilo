@@ -103,6 +103,8 @@ interface SessionBase {
   readonly targetDocumentId?: string;
   readonly targetDocumentContent?: string;
   readonly previewUrl?: string;
+  /** Creation or most recent session activity, in milliseconds since the Unix epoch. */
+  readonly lastActiveAt?: number;
 }
 export interface CockpitAgentSession extends SessionBase {
   readonly kind: "agent";

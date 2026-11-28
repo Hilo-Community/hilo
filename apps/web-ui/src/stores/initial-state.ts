@@ -18,19 +18,23 @@ import type {
 /** The four zone stores and the document buffers, seeded from the options. */
 export function createInitialStores(options?: CockpitStoreOptions) {
   const initialPersona = options?.initialPersona ?? "Develop";
-  const initialChats: readonly CockpitChatTab[] = options?.initialChats ?? [
-    {
-      kind: "agent" as const,
-      chatId: "chat-1",
-      title: "#1 Login UI",
-      modelName: "Codex",
-      validationState: "UnchangedBlue",
-      targetDocumentId: options?.initialActiveDocumentId ?? "src/auth/login.tsx",
-      targetDocumentContent: "export function LoginView() {\n  return true;\n}\n",
-      previewUrl: "preview://local/login",
-      agentExecutionStatus: "Idle",
-    },
-  ];
+  const loadedAt = Date.now();
+  // Sessions saved before activity times were recorded count from now, so every row shows one.
+  const initialChats: readonly CockpitChatTab[] = (
+    options?.initialChats ?? [
+      {
+        kind: "agent" as const,
+        chatId: "chat-1",
+        title: "#1 Login UI",
+        modelName: "Codex",
+        validationState: "UnchangedBlue",
+        targetDocumentId: options?.initialActiveDocumentId ?? "src/auth/login.tsx",
+        targetDocumentContent: "export function LoginView() {\n  return true;\n}\n",
+        previewUrl: "preview://local/login",
+        agentExecutionStatus: "Idle",
+      },
+    ]
+  ).map((chat) => (chat.lastActiveAt === undefined ? { ...chat, lastActiveAt: loadedAt } : chat));
   const initialActiveChat =
     initialChats.find((c) => c.chatId === options?.initialActiveChatId) ?? initialChats[0];
   const initialChatId = initialActiveChat?.chatId ?? "chat-1";

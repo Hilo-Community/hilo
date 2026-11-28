@@ -24,6 +24,9 @@ export function restoreCachedSession(value: unknown): CockpitChatTab {
       ? { targetDocumentContent: legacy.targetDocumentContent }
       : {}),
     ...(typeof legacy.previewUrl === "string" ? { previewUrl: legacy.previewUrl } : {}),
+    ...(typeof legacy.lastActiveAt === "number" && Number.isFinite(legacy.lastActiveAt)
+      ? { lastActiveAt: legacy.lastActiveAt }
+      : {}),
   };
   if (legacy.kind === "terminal" || (legacy.kind === undefined && legacy.modelName === "Shell")) {
     return { ...common, kind: "terminal" };

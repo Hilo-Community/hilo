@@ -68,7 +68,11 @@ describe("@hilo/web-ui — Zone 3 groups and sessions", () => {
     const controller = new CockpitDomController({ rootContainer, stores, editorView });
     const editorDom = editorView.getEditorView().dom;
     const controls = rootContainer.querySelector(".sidebar-project-controls");
-    expect(controls?.querySelectorAll("button")).toHaveLength(1);
+    expect(
+      Array.from(controls?.querySelectorAll("button") ?? [], (button) =>
+        button.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Open project", "Search workspaces", "Properties", "More workspace actions"]);
     expect(controls?.querySelector("button")?.disabled).toBe(true);
     expect(controls?.querySelector("button")?.textContent).toBe("Open project");
     for (const section of ["search", "git", "debug", "mcp"] as const) {

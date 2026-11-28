@@ -1,4 +1,5 @@
 @layer components {
+  .hilo-zone-2-sidebar,
   .sidebar-navigation,
   .sidebar-project-controls {
     --sidebar-row-height: 28px;
@@ -17,6 +18,7 @@
     --sidebar-icon-hover: #414141;
   }
 
+  .hilo-zone-2-sidebar,
   .sidebar-navigation {
     position: relative;
   }
@@ -24,9 +26,68 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-bottom: 12px;
-    margin-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+  }
+  .sidebar-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 var(--sidebar-edge);
+    padding-left: calc(var(--sidebar-edge) + var(--sidebar-leading-inset));
+    margin: 4px 0;
+  }
+  .sidebar-section-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+  .sidebar-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  /* A small CodeMirror field (editor-cm6 createPromptInput), styled like the agent composer
+     (theme/agent.css .hilo-agent-composer): a bordered pill with the field itself transparent. */
+  .sidebar-search {
+    display: flex;
+    align-items: center;
+    height: var(--sidebar-row-height);
+    margin: 0 var(--sidebar-edge) 2px;
+    padding: 0 12px;
+    border: 1px solid var(--color-input-border, #303030);
+    border-radius: 999px;
+    background: var(--color-composer);
+    /* The CodeMirror field inherits these (its own theme sets `inherit`). */
+    color: var(--color-text-primary);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .sidebar-search:focus-within {
+    border-color: color-mix(in srgb, var(--color-text-primary) 22%, transparent);
+  }
+  /* editor.css gives every .cm-editor the code editor's look (`!bg-main font-mono text-[13px]
+     w-full h-full`) in this same layer, so these need the two-class selector to win. */
+  .sidebar-search .cm-editor {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    height: auto;
+    background: transparent !important;
+    font-family: inherit;
+    font-size: inherit;
+  }
+  .sidebar-search .cm-scroller,
+  .sidebar-search .cm-content {
+    font-family: inherit;
+  }
+  /* A code editor's scroller top-aligns its line; centred, it reads as a plain text field. */
+  .sidebar-search .cm-scroller {
+    align-items: center;
+  }
+  .sidebar-search .cm-content {
+    padding: 0;
   }
   .sidebar-row {
     display: flex;
@@ -382,7 +443,98 @@
     padding: 4px;
     border: 0;
     border-radius: 8px;
-    background: #262626;
+    background: var(--color-card);
+  }
+  .sidebar-menu--submenu {
+    position: fixed;
+    right: auto;
+    z-index: 101;
+    min-width: 128px;
+    max-width: calc(100vw - 8px);
+    max-height: calc(100vh - 8px);
+    overflow: auto;
+  }
+  .sidebar-menu--titled {
+    width: 200px;
+  }
+  .sidebar-menu--searchable {
+    width: 208px;
+  }
+  .sidebar-menu-search {
+    height: 30px;
+    min-width: 0;
+    margin: 0 0 6px;
+    padding: 0 8px 4px;
+    gap: 8px;
+    border: 0;
+    border-bottom: 1px solid var(--color-sidebar-divider, #323231);
+    border-radius: 0;
+    background: transparent;
+  }
+  .sidebar-menu-search:focus-within {
+    border-color: var(--color-sidebar-divider, #323231);
+  }
+  .sidebar-menu-search .sidebar-menu-icon {
+    align-items: center;
+    justify-content: center;
+  }
+  .sidebar-menu-search .sidebar-menu-icon svg {
+    flex: none;
+    width: 16px;
+    height: 16px;
+  }
+  .sidebar-project-controls [hidden],
+  .sidebar-menu-item[hidden] {
+    display: none;
+  }
+  .sidebar-menu-section-title {
+    padding: 2px 8px 4px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .sidebar-menu-checkbox {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--color-control-muted, #7f7f7e);
+    border-radius: 4px;
+  }
+  [aria-checked="true"] .sidebar-menu-checkbox {
+    border-color: transparent;
+    background: #3b82f6;
+    color: #fff;
+  }
+  .sidebar-menu-checkbox svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+    transform: translateY(0.5px);
+  }
+  .sidebar-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .sidebar-menu-title {
+    color: var(--color-text-secondary);
+    font-weight: 500;
+  }
+  .sidebar-menu-reset {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--color-sidebar-highlight, #4cafff);
+    font: inherit;
+    cursor: pointer;
+  }
+  .sidebar-menu-reset:hover {
+    text-decoration: underline;
   }
   .sidebar-menu-item {
     display: flex;
@@ -402,8 +554,9 @@
     cursor: pointer;
   }
   .sidebar-menu-item:hover:not(:disabled),
+  .sidebar-menu-item[aria-expanded="true"],
   .sidebar-menu-item:focus-visible {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--color-button, #252525);
     outline: none;
   }
   .sidebar-menu-item:disabled {
@@ -445,15 +598,28 @@
   .sidebar-menu-item:disabled .sidebar-menu-icon {
     color: inherit;
   }
+  .sidebar-menu-item--highlighted {
+    color: var(--color-sidebar-highlight, #4cafff);
+  }
+  .sidebar-menu-item--highlighted:not(:disabled) .sidebar-menu-icon,
+  .sidebar-menu-item--highlighted:hover:not(:disabled) .sidebar-menu-icon {
+    color: inherit;
+  }
   .sidebar-menu-hint {
     font-size: 11px;
     letter-spacing: 0.04em;
     color: var(--color-text-muted);
   }
+  .sidebar-menu-trailing {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
   .sidebar-menu-separator {
     height: 1px;
     margin: 3px 6px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--color-sidebar-divider, #323231);
   }
   .sidebar-icon-button:focus-visible {
     outline: 1px solid var(--color-text-secondary);
